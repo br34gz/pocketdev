@@ -23,6 +23,7 @@ typedef void  (*qemu_cleanup_fn)(void);
 // exit(2), which triggers this path.
 static void pocket_qemu_atexit_hook(void) {
     pocket_boot_log("qemu_exit_hook");
+    pocket_boot_log_rss();
 }
 
 static int pocket_qemu_hook_armed = 0;

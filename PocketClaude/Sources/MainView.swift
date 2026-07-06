@@ -11,6 +11,7 @@ struct MainView: View {
     @State private var showAuthSheet = false
     @State private var authSheetURL: URL?
     @State private var codeToPaste: String = ""
+    @State private var showSettings = false
 
     var body: some View {
         logBoot("mainview_body")
@@ -38,6 +39,7 @@ struct MainView: View {
                 }
             }
             .sheet(isPresented: $showAuthSheet) { authSheet }
+            .sheet(isPresented: $showSettings) { SettingsView() }
         }
     }
 
@@ -74,18 +76,39 @@ struct MainView: View {
             .background(.black.opacity(0.85))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         case .error(let msg):
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.orange)
-                Text("VM error")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Text(msg)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
+            errorCard(title: "VM error", message: msg)
+        case .stopped:
+            // If the session started emitting to the console and then
+            // stopped without an explicit error, we most likely got
+            // jetsam-killed by iOS's memory manager. Give the user the
+            // specific hint per spec plus a Retry.
+            if env.sessionSawSerial {
+                errorCard(
+                    title: "VM session ended",
+                    message: "The Alpine kernel started printing to the console, then the session ended without an error. Most likely iOS killed the process for memory pressure - LiveContainer runs sideloaded apps as PluginKit extensions with a tighter jetsam quota (~500 MB) than main apps. Try lowering guest RAM in Settings (currently \(GuestRAM.current()) MB), or sideloading via SideStore/AltStore directly instead of LiveContainer."
+                )
+            } else {
+                EmptyView()
+            }
+        case .running:
+            EmptyView()
+        }
+    }
+
+    private func errorCard(title: String, message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 32))
+                .foregroundStyle(.orange)
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            HStack(spacing: 12) {
                 Button {
                     env.startEngine()
                 } label: {
@@ -94,13 +117,19 @@ struct MainView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("Settings", systemImage: "slider.horizontal.3")
+                        .padding(.horizontal, 8)
+                }
+                .buttonStyle(.bordered)
+                .tint(.white)
             }
-            .padding(24)
-            .background(.black.opacity(0.9))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-        case .stopped, .running:
-            EmptyView()
         }
+        .padding(24)
+        .background(.black.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     @ToolbarContentBuilder
@@ -126,6 +155,11 @@ struct MainView: View {
                     openWorkspaceInFiles()
                 } label: {
                     Label("Open Workspace in Files", systemImage: "folder")
+                }
+                Button {
+                    showSettings = true
+                } label: {
+                    Label("Settings", systemImage: "slider.horizontal.3")
                 }
                 if let url = env.pendingAuthURL {
                     Button {

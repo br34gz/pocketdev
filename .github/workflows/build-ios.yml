@@ -212,7 +212,30 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.3.2 - fix missing efi-virtio.rom + switch to MMIO virtio.
+            v0.3.3 - jetsam diagnostics + guest RAM control.
+
+            v0.3.2 boot log showed QEMU launched, main loop entered,
+            sockets connected, Alpine kernel started printing, then
+            the log cut off with no qemu_exit_hook: classic iOS jetsam
+            kill. LiveContainer runs sideloaded apps as PluginKit
+            extensions with tighter memory quotas.
+
+            Changes:
+            - Default guest RAM dropped from 1024 MB to 768 MB.
+            - Settings sheet with RAM slider (384-2048 MB, step 64),
+              persisted via UserDefaults, read at engine start. Bottom
+              toolbar menu gets a "Settings" entry.
+            - Signal handlers installed at process start for SIGTERM,
+              SIGABRT, SIGBUS, SIGSEGV, SIGILL. When any fires, boot
+              log gets 'signal_received sig=N' before termination.
+              (SIGKILL from jetsam cannot be caught.)
+            - DispatchSource memory-pressure observer armed at engine
+              start; warning/critical events tag the boot log plus
+              the current RSS.
+            - atexit hook now also logs rss_mb=N via mach_task_basic_info.
+            - MainView 'session ended' overlay shows a jetsam-specific
+              hint when the console started emitting but the VM stopped,
+              plus Settings + Retry buttons right on the card.
 
             v0.3.1's qemu stderr revealed the definitive error:
               "qemu-aarch64-softmmu: failed to find romfile efi-virtio.rom"

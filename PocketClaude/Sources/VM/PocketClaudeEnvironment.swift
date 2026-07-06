@@ -23,6 +23,11 @@ final class PocketClaudeEnvironment: ObservableObject {
     @Published private(set) var engine: (any VMEngine)?
     @Published var pendingAuthURL: URL?
     @Published var vmState: VMState = .stopped
+    /// True once the current session has seen at least one byte on the
+    /// serial console. Used by MainView to distinguish "died before boot"
+    /// (probably argv / firmware / socket issue) from "died after boot
+    /// progressed" (probably jetsam / iOS memory kill).
+    @Published var sessionSawSerial: Bool = false
 
     /// URL the guest just published; wizard step 3 offers Safari handoff.
     var latestAuthURL: URL? { pendingAuthURL }
@@ -33,6 +38,7 @@ final class PocketClaudeEnvironment: ObservableObject {
 
     func startEngine() {
         "env_start_engine".withCString { pocket_boot_log($0) }
+        sessionSawSerial = false
         stopEngine()
         let workspacePath = resolvedWorkspacePath()
         let real: any VMEngine

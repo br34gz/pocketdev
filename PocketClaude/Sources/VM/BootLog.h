@@ -16,6 +16,11 @@ extern "C" {
 // broken log path can't cascade into a real crash.
 void pocket_boot_log(const char *phase);
 
+// Log the current process's resident set size, in MB. Uses
+// mach_task_basic_info; the sample happens at call time. Useful for
+// jetsam-kill forensics from the atexit hook.
+void pocket_boot_log_rss(void);
+
 #ifdef __cplusplus
 }
 #endif

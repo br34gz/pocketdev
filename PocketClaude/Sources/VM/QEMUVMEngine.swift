@@ -46,17 +46,24 @@ final class QEMUVMEngine: VMEngine {
     private var controlBuffer = ""
     private var firstSerialSeen = false
     private var bootTimeoutTimer: DispatchSourceTimer?
+    private var memPressureSource: DispatchSourceMemoryPressure?
 
     private static var isRunning = false
 
-    init(workspacePath: String?, ramMB: Int = 1024, vcpus: Int = 2) {
+    init(workspacePath: String?, ramMB: Int? = nil, vcpus: Int = 2) {
         self.workspacePath = workspacePath
-        self.ramMB = ramMB
+        // v0.3.3: default drops from 1024 to 768 to fit under
+        // PluginKit-extension jetsam quotas (LiveContainer runs us as
+        // one). User can retune via Settings; GuestRAM.current() reads
+        // from UserDefaults with fallback to the default.
+        self.ramMB = ramMB ?? GuestRAM.current()
         self.vcpus = vcpus
     }
 
     func start() {
         logPhase("qemu_engine_start")
+        logPhase("qemu_engine_ram_mb=\(self.ramMB)")
+        armMemoryPressureObserver()
         guard !Self.isRunning else {
             state = .error("VM already running in this process")
             return
@@ -196,8 +203,36 @@ final class QEMUVMEngine: VMEngine {
 
     private func finish(with newState: VMState) {
         cancelBootTimeout()
+        cancelMemoryPressureObserver()
+        pocket_boot_log_rss()
         Self.isRunning = false
         state = newState
+    }
+
+    // MARK: - Memory pressure
+
+    private func armMemoryPressureObserver() {
+        cancelMemoryPressureObserver()
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical], queue: .global(qos: .utility)
+        )
+        src.setEventHandler {
+            let event = src.data
+            if event.contains(.critical) {
+                logPhase("mem_pressure_critical")
+                pocket_boot_log_rss()
+            } else if event.contains(.warning) {
+                logPhase("mem_pressure_warning")
+                pocket_boot_log_rss()
+            }
+        }
+        src.resume()
+        memPressureSource = src
+    }
+
+    private func cancelMemoryPressureObserver() {
+        memPressureSource?.cancel()
+        memPressureSource = nil
     }
 
     private func runQemu(dylib: String, args: [String]) {
@@ -223,7 +258,10 @@ final class QEMUVMEngine: VMEngine {
             if !self.firstSerialSeen {
                 self.firstSerialSeen = true
                 logPhase("first_serial_output")
-                DispatchQueue.main.async { self.cancelBootTimeout() }
+                DispatchQueue.main.async {
+                    self.cancelBootTimeout()
+                    PocketClaudeEnvironment.shared.sessionSawSerial = true
+                }
             }
             self.onOutput?(bytes)
         }
