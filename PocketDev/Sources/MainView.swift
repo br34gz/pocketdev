@@ -37,7 +37,14 @@ struct MainView: View {
             }
             .sheet(isPresented: $showAuthSheet) { authSheet }
             .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showJITSheet) { JITStatusSheet(active: env.selectedVariant == "jit") }
+            .sheet(isPresented: $showJITSheet) {
+                StatusSheet(
+                    vmState: env.vmState,
+                    jitActive: env.selectedVariant == "jit",
+                    guestOS: env.guestOS,
+                    claudeVariant: env.guestClaudeVariant
+                )
+            }
         }
     }
 
@@ -56,23 +63,12 @@ struct MainView: View {
     @ViewBuilder
     private var statusOverlay: some View {
         switch env.vmState {
-        case .starting:
-            VStack(spacing: 12) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                Text("Launching QEMU...")
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                Text(bootingCopy)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+        case .starting, .running:
+            if env.bootStage != .ready && env.bootStage != .idle {
+                bootStageCard
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .animation(.easeInOut(duration: 0.35), value: env.bootStage)
             }
-            .padding(24)
-            .background(.black.opacity(0.85))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
         case .error(let msg):
             errorCard(title: "VM error", message: msg)
         case .stopped:
@@ -88,8 +84,73 @@ struct MainView: View {
             } else {
                 EmptyView()
             }
-        case .running:
-            EmptyView()
+        }
+    }
+
+    /// v0.7.2 boot-stages overlay. Advances through 4 named stages
+    /// (Starting / Booting / Logging in / Starting Claude Code), then
+    /// dismisses itself when claude's TUI drops into view.
+    private var bootStageCard: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .tint(.white)
+                .scaleEffect(1.4)
+                .id("spinner")
+            VStack(spacing: 8) {
+                Text(env.bootStage.title)
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.white)
+                    .id("title-\(env.bootStage.rawValue)")
+                    .transition(.opacity)
+                Text(subtitleCopy)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Progress bar underlays the whole thing to convey advancement.
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.15))
+                    Capsule().fill(Color.white.opacity(0.75))
+                        .frame(width: geo.size.width * env.bootStage.progress)
+                        .animation(.easeInOut(duration: 0.6), value: env.bootStage)
+                }
+            }
+            .frame(height: 3)
+            .frame(maxWidth: 220)
+            // Step-checklist under the bar (visible-only in landscape / iPad).
+            HStack(spacing: 6) {
+                ForEach([BootStage.launching, .booting, .loggingIn, .startingClaude], id: \.rawValue) { stage in
+                    Circle()
+                        .fill(stage <= env.bootStage ? Color.white.opacity(0.9) : Color.white.opacity(0.2))
+                        .frame(width: 6, height: 6)
+                }
+            }
+        }
+        .padding(.horizontal, 32)
+        .padding(.vertical, 28)
+        .frame(maxWidth: 320)
+        .background(.black.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var subtitleCopy: String {
+        switch env.bootStage {
+        case .launching, .idle:
+            return env.selectedVariant == "jit"
+                ? "JIT active — usually 15-30 seconds."
+                : "Interpreter mode — usually 30-60 seconds. The terminal will start streaming below."
+        case .booting:
+            return "Kernel started. Systemd services coming up..."
+        case .loggingIn:
+            return "Login prompt hit. Auto-login as 'dev' about to fire."
+        case .startingClaude:
+            return "Guest is warm. Claude Code is opening a session."
+        case .ready:
+            return ""
         }
     }
 
@@ -138,25 +199,30 @@ struct MainView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(stateColor)
-                    .frame(width: 10, height: 10)
-                Text(env.vmState.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                // v0.6.0: subtle single dot instead of the JIT/SE pill.
-                // Tap opens a small info sheet.
-                Button {
-                    showJITSheet = true
-                } label: {
+            // v0.7.2: the JIT dot was an 8-pt Circle with .plain button
+            // style - tap area is effectively zero on iOS 17 and the
+            // sheet never opened. Move the tap target to the whole
+            // state cluster (state dot + label + JIT dot) with an
+            // explicit content shape so any part of the cluster works.
+            Button {
+                showJITSheet = true
+            } label: {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(stateColor)
+                        .frame(width: 10, height: 10)
+                    Text(env.vmState.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Circle()
                         .fill(jitDotColor)
                         .frame(width: 8, height: 8)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("JIT status")
+                .contentShape(Rectangle())
+                .padding(.vertical, 6)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Status: \(env.vmState.label). JIT \(env.selectedVariant == "jit" ? "active" : "inactive"). Tap for details.")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
@@ -263,41 +329,88 @@ struct MainView: View {
     }
 }
 
-/// Small explanation sheet the JIT dot opens.
-private struct JITStatusSheet: View {
-    let active: Bool
+/// Combined VM + JIT + guest info sheet. Reached by tapping the status
+/// cluster in the top-left of MainView's toolbar.
+private struct StatusSheet: View {
+    let vmState: VMState
+    let jitActive: Bool
+    let guestOS: String?
+    let claudeVariant: String?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(active ? Color.green : Color.gray.opacity(0.4))
-                        .frame(width: 14, height: 14)
-                    Text(active ? "JIT active" : "Interpreter mode")
-                        .font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    row(
+                        color: vmStateColor,
+                        title: "VM \(vmStateLabel)",
+                        subtitle: vmStateCopy
+                    )
+                    row(
+                        color: jitActive ? .green : Color.gray.opacity(0.4),
+                        title: jitActive ? "JIT active" : "Interpreter mode",
+                        subtitle: jitCopy
+                    )
+                    if let os = guestOS {
+                        row(
+                            color: .blue,
+                            title: "Guest: \(os)",
+                            subtitle: claudeVariant ?? "Claude Code install strategy unknown until BOOT_OK arrives from the control channel."
+                        )
+                    }
+                    Text("Full JIT support is coming — it depends on sideload infrastructure evolving so a JIT execute grant can land inside a plugin-hosted iOS process. For now interpreter mode is a working baseline; the 30-60s boot is a one-time cost per launch and everything after is just claude-code doing its thing.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 8)
                 }
-                Text(active
-                    ? "The VM is running with JIT-compiled guest code. Boot is fast (~15-30 seconds) and Claude Code should feel responsive."
-                    : "The VM runs in interpreter mode. Boot takes 30-60 seconds. Full JIT support (up to 10x faster) is on the roadmap - it depends on sideload infrastructure evolving so a JIT permission can actually land in a plugin-hosted iOS process."
-                )
-                .font(.callout)
-                Text(active
-                    ? "Under the hood: QEMU's TCG emits native ARM64 instructions instead of walking each guest instruction one-by-one."
-                    : "Under the hood: interpreter is fine for Claude Code sessions. The 30-60 second boot is a one-time cost per launch.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                Spacer()
-                Button("OK") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                .padding(24)
             }
-            .padding(24)
-            .navigationTitle("JIT status")
+            .navigationTitle("Status")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }.bold()
+                }
+            }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+
+    private func row(color: Color, title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle().fill(color).frame(width: 14, height: 14).padding(.top, 4)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(subtitle).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var vmStateColor: Color {
+        switch vmState {
+        case .stopped:  return .gray
+        case .starting: return .yellow
+        case .running:  return .green
+        case .error:    return .red
+        }
+    }
+
+    private var vmStateLabel: String { vmState.label.lowercased() }
+
+    private var vmStateCopy: String {
+        switch vmState {
+        case .stopped:  return "The virtual machine isn't running. Restart from the ... menu to try again."
+        case .starting: return "QEMU is spinning up the Debian guest. Progress overlay on the terminal shows the current stage."
+        case .running:  return "The VM is running and the terminal is live."
+        case .error(let msg): return msg
+        }
+    }
+
+    private var jitCopy: String {
+        jitActive
+            ? "QEMU's TCG is emitting native ARM64 code for the guest CPU. Boot is fast, guest responsiveness is close to native."
+            : "QEMU walks each guest instruction one-by-one (interpreter). Slower but works everywhere. Full JIT needs a sideload-runtime exec grant we can't get from a plugin-hosted process today."
     }
 }
 

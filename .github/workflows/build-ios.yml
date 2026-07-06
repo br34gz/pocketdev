@@ -270,7 +270,36 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketDev v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            PocketDev v0.7.1 - Bun DFG JIT off, guest rename cleanup.
+            PocketDev v0.7.2 - boot animation + status sheet UX fixes.
+
+            v0.7.1 shipped the glibc guest with Bun DFG off but two
+            UX bugs remained:
+
+              1. Wizard "Start VM" -> long silent stare at a blinking
+                 cursor for ~30-60s with no indication anything was
+                 happening.
+              2. Toolbar JIT dot -> tap did nothing (8pt Circle with
+                 .plain button style meant the tap area was zero on
+                 iOS 17; sheet never opened).
+
+            v0.7.2 fixes both:
+
+            - New BootStage state machine + animated overlay above the
+              terminal: "Starting virtual machine..." -> "Booting
+              Debian..." (first serial byte) -> "Logging in..." (login
+              prompt in console) -> "Starting Claude Code..." (version
+              probe printed) -> dismiss (Claude's TUI border chars or
+              welcome text detected). Progress bar underneath, step
+              dots below. Cross-fades between stages.
+            - Toolbar status cluster (state dot + label + JIT dot) is
+              now a single Button with an explicit .contentShape
+              Rectangle. Tap opens a new combined StatusSheet showing
+              VM state, JIT state, guest OS + claude variant (from
+              the control channel), and the "JIT is coming, interpreter
+              is fine for now" copy.
+
+            v0.7.1 guest changes (BUN_JSC_useDFGJIT=0, hostname
+            application in /pocket-init) all still in play.
 
             v0.7.0 on-device: Debian glibc guest booted cleanly,
             autologin worked, `claude --version` printed 2.1.201.

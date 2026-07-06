@@ -22,6 +22,12 @@ struct TerminalHostView: UIViewRepresentable {
         context.coordinator.terminal = terminal
 
         engine.onOutput = { [weak terminal] bytes in
+            // v0.7.2: also let the environment observe console output so
+            // its bootStage scanner can advance the overlay through
+            // launching -> booting -> logging in -> starting claude ->
+            // ready. Runs on the engine's callback queue; observers
+            // hop to main themselves.
+            PocketDevEnvironment.shared.observeConsoleOutput(bytes)
             DispatchQueue.main.async {
                 terminal?.feed(byteArray: bytes[...])
             }

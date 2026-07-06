@@ -39,6 +39,14 @@ final class PocketDevEnvironment: ObservableObject {
     /// Which base OS the guest image is (v0.6.0+): "debian-12" etc.
     /// Older images don't emit this and it stays nil.
     @Published var guestOS: String?
+    /// Coarse boot progression shown as an animated overlay in MainView.
+    /// Advances as the console emits kernel messages, the login prompt,
+    /// the .profile version probe, and finally claude's own output.
+    @Published var bootStage: BootStage = .idle
+    /// Scratchpad for console-scanner substring matches (login prompt,
+    /// version banner, claude welcome).
+    private var consoleTail: String = ""
+    private var consoleTailLimit = 4096
 
     /// URL the guest just published; wizard step 3 offers Safari handoff.
     var latestAuthURL: URL? { pendingAuthURL }
@@ -50,6 +58,8 @@ final class PocketDevEnvironment: ObservableObject {
     func startEngine() {
         "env_start_engine".withCString { pocket_boot_log($0) }
         sessionSawSerial = false
+        bootStage = .launching
+        consoleTail = ""
         stopEngine()
         let workspacePath = resolvedWorkspacePath()
         let real: any VMEngine
@@ -89,6 +99,43 @@ final class PocketDevEnvironment: ObservableObject {
             // startDownloadingUbiquitousItem + NSFileCoordinator).
         }
         return url.path
+    }
+
+    /// Advance the bootStage based on markers that appear on the console.
+    /// Called by QEMUVMEngine on every incoming byte batch (and by
+    /// StubVMEngine, so the fake boot animation looks the same).
+    func observeConsoleOutput(_ bytes: [UInt8]) {
+        guard let chunk = String(bytes: bytes, encoding: .utf8) else { return }
+        consoleTail += chunk
+        if consoleTail.count > consoleTailLimit {
+            consoleTail.removeFirst(consoleTail.count - consoleTailLimit)
+        }
+        var next = bootStage
+        // Stage 2: any console byte means the kernel is emitting.
+        if next < .booting { next = .booting }
+        // Stage 3: the login prompt (or its Debian header line) appears.
+        if next < .loggingIn,
+           consoleTail.contains("login:") || consoleTail.contains("Debian GNU/Linux") {
+            next = .loggingIn
+        }
+        // Stage 4: our .profile's version probe fires.
+        if next < .startingClaude,
+           consoleTail.contains("claude --version:") {
+            next = .startingClaude
+        }
+        // Stage 5: dismiss overlay when claude prints its own welcome
+        // banner or drops the user into the REPL.
+        if next < .ready,
+           consoleTail.contains("Welcome to Claude")
+            || consoleTail.contains("Try /help")
+            || consoleTail.contains("╭") // claude-code's TUI border char
+        {
+            next = .ready
+        }
+        if next != bootStage {
+            let bs = next
+            DispatchQueue.main.async { self.bootStage = bs }
+        }
     }
 
     private func scanForAuthURL(_ bytes: [UInt8]) {
