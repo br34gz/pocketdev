@@ -46,9 +46,15 @@ jobs:
           xcodegen generate
           ls -la PocketClaude.xcodeproj/
 
-      # v0.2.6 — framework bisection layer "io_display"
-      # (cumulative on top of v0.2.5's pixman_crypto layer, which
-      #  launched cleanly). 21 frameworks embedded total.
+      # v0.2.7 — framework bisection layer "qemu" (the main event).
+      # 22 frameworks embedded total. This adds only qemu-aarch64-softmmu
+      # on top of v0.2.6's 21 (which all launched cleanly on device).
+      # All of qemu-aarch64-softmmu's @rpath deps are already present in
+      # the v0.2.6 set (pixman, jpeg, epoxy, gio, gobject, glib, zstd,
+      # slirp, spice-server, virglrenderer, gmodule) — verified via
+      # otool -L. VM engine still routed to stub — we're not dlopen'ing
+      # qemu yet, just testing whether dyld / amfid accept it at
+      # process start.
       #
       # None of these are dlopen'd by our code — the VM engine is still
       # routed to the stub. The test is whether iOS amfid / the
@@ -72,23 +78,19 @@ jobs:
       #   crypto.1.1   -> (self)   [openssl 1.1 crypto lib]
       #   ssl.1.1      -> crypto.1.1
       #
-      # v0.2.6 additions (verified: transitive closure stays in the set):
-      #   slirp.0          -> glib
-      #   zstd.1           -> (self)
-      #   spice-server.1   -> glib, gio, gobject, pixman, ssl, crypto,
-      #                       opus, jpeg, gstreamer, gstapp
-      #   virglrenderer.1  -> epoxy, vulkan
-      #   vulkan.1         -> (self)   [loader; no ICD present on iOS]
-      #   gstreamer-1.0.0  -> gobject, glib, intl, gmodule
-      #   gstbase-1.0.0    -> gstreamer, gobject, glib, intl
-      #   gstapp-1.0.0     -> gstbase, gstreamer, gobject, glib
-      #   opus.0           -> (self)
+      # v0.2.6 additions (verified clean on device):
+      #   slirp.0, zstd.1, spice-server.1, virglrenderer.1, vulkan.1,
+      #   gstreamer-1.0.0, gstbase-1.0.0, gstapp-1.0.0, opus.0
       #
-      # Higher risk in this layer: vulkan and virglrenderer inspect the
-      # platform for GPUs/ICDs on init; gstreamer registers plugin
-      # scanners. If v0.2.6 crashes and v0.2.5 didn't, the offender is
-      # almost certainly one of vulkan / virglrenderer / spice-server /
-      # gstreamer trio, and v0.2.6.1+ will pull them out one at a time.
+      # v0.2.7 addition (verified: deps closed inside v0.2.6 set):
+      #   qemu-aarch64-softmmu  191 MB
+      #     -> pixman, jpeg, epoxy, gio, gobject, glib, zstd, slirp,
+      #        spice-server, virglrenderer, gmodule
+      #
+      # If v0.2.7 crashes and v0.2.6 didn't: the offender is
+      # qemu-aarch64-softmmu specifically. Next iteration adds dyld_info
+      # -platform and otool -l output for the qemu framework so we can
+      # see MinimumOSVersion, LC_ATOM_INFO, C constructors etc.
 
       - name: Fetch UTM-SE (source of the iOS QEMU frameworks)
         env:
@@ -100,7 +102,7 @@ jobs:
           cd build/utm
           unzip -q UTM-SE.ipa
 
-      - name: Extract layer frameworks (glib + pixman_crypto + io_display)
+      - name: Extract full framework set (glib + pixman_crypto + io_display + qemu)
         run: |
           mkdir -p build/staged-frameworks
           SRC="build/utm/Payload/UTM SE.app/Frameworks"
@@ -109,7 +111,8 @@ jobs:
               iconv.2 intl.8 ffi.8 \
               pixman-1.0 jpeg.62 epoxy.0 crypto.1.1 ssl.1.1 \
               slirp.0 zstd.1 spice-server.1 virglrenderer.1 vulkan.1 \
-              gstreamer-1.0.0 gstbase-1.0.0 gstapp-1.0.0 opus.0; do
+              gstreamer-1.0.0 gstbase-1.0.0 gstapp-1.0.0 opus.0 \
+              qemu-aarch64-softmmu; do
             if [[ -d "$SRC/$fw.framework" ]]; then
               cp -R "$SRC/$fw.framework" build/staged-frameworks/
             else
@@ -185,43 +188,45 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            FRAMEWORK BISECTION — layer "io_display"
-            (cumulative — 21 frameworks embedded, all from
-            utmapp/UTM v5.0.3 UTM-SE.ipa, ad-hoc re-signed).
+            FRAMEWORK BISECTION — layer "qemu" (the main event).
+            22 frameworks embedded — the full set from
+            utmapp/UTM v5.0.3 UTM-SE.ipa, ad-hoc re-signed.
 
-            v0.2.4+v0.2.5 set (confirmed clean on device):
+            HEADS UP — download size jumps from ~7 MB (v0.2.6) to
+            ~150 MB. That's qemu-aarch64-softmmu, the 191 MB QEMU
+            binary itself.
+
+            v0.2.4-v0.2.6 set (all confirmed clean on device):
               glib-2.0.0, gio-2.0.0, gobject-2.0.0, gmodule-2.0.0,
               iconv.2, intl.8, ffi.8, pixman-1.0, jpeg.62, epoxy.0,
-              crypto.1.1, ssl.1.1
+              crypto.1.1, ssl.1.1, slirp.0, zstd.1, spice-server.1,
+              virglrenderer.1, vulkan.1, gstreamer-1.0.0,
+              gstbase-1.0.0, gstapp-1.0.0, opus.0  (21 total)
 
-            v0.2.6 additions (delta):
-              slirp.0          user-mode networking
-              zstd.1           compression
-              spice-server.1   display protocol
-              virglrenderer.1  GL/GLES virtualization
-              vulkan.1         Vulkan loader
-              gstreamer-1.0.0  media pipeline core
-              gstbase-1.0.0    media pipeline base
-              gstapp-1.0.0     media pipeline app hook
-              opus.0           audio codec
+            v0.2.7 addition (delta):
+              qemu-aarch64-softmmu   the actual QEMU binary
 
             None are dlopen'd or LC_LOAD_DYLIB'd by our code — the VM
-            engine is still routed to the stub. Test: does the
-            sideloader / amfid accept 21 frameworks at install/launch.
-            Only qemu-aarch64-softmmu is missing from this build; the
-            full 22-set caused the v0.2.0/v0.2.1 crash.
+            engine is still routed to the stub. Purely testing whether
+            iOS amfid / the sideloader accept the full 22-set at
+            install/launch. If v0.2.7 crashes and v0.2.6 didn't, we
+            have narrowed the offender to qemu-aarch64-softmmu itself.
 
             IMPORTANT — DELETE THE PREVIOUS INSTALL FIRST:
             Long-press icon → Remove App → Delete App before installing.
             iOS caches signatures per bundle-ID; a plain reinstall can
             inherit stale amfid state.
 
-            Expected outcome: identical UI to v0.2.5 — launches to the
-            wizard, workspace picker works, stepping through to Finish
-            transitions to MainView with the stub terminal. Boot log
-            should show `framework_layer_glib`,
-            `framework_layer_pixman_crypto`, and
-            `framework_layer_io_display` right after `dylib_ctor`.
+            Expected outcome (if the framework is amfid-safe):
+            identical UI to v0.2.6 — launches to the wizard,
+            workspace picker works, Finish transitions to MainView
+            with the stub terminal. Boot log should show all four
+            layer markers (glib, pixman_crypto, io_display, qemu)
+            right after `dylib_ctor`.
+
+            If it crashes: the offender is qemu-aarch64-softmmu itself,
+            and the next build ships dyld_info + otool -l output for
+            that framework so we can see what dyld is choking on.
 
             If it crashes: last line in the boot log tells us which
             phase died. Copy it via the yellow banner → sheet → Copy.

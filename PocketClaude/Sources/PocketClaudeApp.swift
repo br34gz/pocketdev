@@ -44,6 +44,7 @@ struct PocketClaudeApp: App {
         logBoot("framework_layer_glib")
         logBoot("framework_layer_pixman_crypto")
         logBoot("framework_layer_io_display")
+        logBoot("framework_layer_qemu")
         logBoot("app_init")
     }
 
