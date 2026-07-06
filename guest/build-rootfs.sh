@@ -64,7 +64,10 @@ echo "$CLAUDE_VERSION" > /etc/pocket-claude-version
 useradd -m -s /bin/bash claude
 passwd -d claude || true
 
-# Autologin on ttyAMA0 via systemd override.
+# Autologin on ttyAMA0 via systemd override + manual symlink.
+# systemctl enable when systemd isn't running (which is our case
+# inside the build container) doesn't reliably create the .wants
+# symlink for template units. Do it explicitly.
 mkdir -p /etc/systemd/system/serial-getty@ttyAMA0.service.d
 cat > /etc/systemd/system/serial-getty@ttyAMA0.service.d/override.conf <<'EOF'
 [Service]
@@ -72,7 +75,10 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin claude --noclear --keep-baud 115200,38400,9600 ttyAMA0 $TERM
 Type=idle
 EOF
-systemctl enable serial-getty@ttyAMA0.service
+mkdir -p /etc/systemd/system/getty.target.wants
+ln -sf /lib/systemd/system/serial-getty@.service \
+    /etc/systemd/system/getty.target.wants/serial-getty@ttyAMA0.service
+systemctl enable serial-getty@ttyAMA0.service 2>/dev/null || true
 
 # systemd-networkd for DHCP on virtio-net-device.
 mkdir -p /etc/systemd/network

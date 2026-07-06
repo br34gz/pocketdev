@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 
-TIMEOUT_S = 600  # 10 minutes hard ceiling
+TIMEOUT_S = 900  # 15 minutes hard ceiling (Debian systemd + interpreter is slow)
 CONSOLE_SOCK = "/tmp/smoke-console.sock"
 CONTROL_SOCK = "/tmp/smoke-control.sock"
 SUCCESS_RE = re.compile(rb"claude --version:\s*([0-9]+\.[0-9]+\.[0-9]+)")
