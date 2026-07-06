@@ -1,4 +1,5 @@
 #include "QEMUBootstrap.h"
+#include "BootLog.h"
 
 #include <dlfcn.h>
 #include <errno.h>
@@ -15,23 +16,57 @@ typedef int   (*qemu_init_fn)(int, const char *[], const char *[]);
 typedef void  (*qemu_main_loop_fn)(void);
 typedef void  (*qemu_cleanup_fn)(void);
 
+// atexit hook: qemu_init is documented to exit(2) on argv errors. On
+// Darwin, atexit handlers run on any exit() call (voluntary termination)
+// so this leaves a breadcrumb in the boot log even if qemu terminates
+// the process. Doesn't run on SIGKILL / SIGABRT but qemu_init uses
+// exit(2), which triggers this path.
+static void pocket_qemu_atexit_hook(void) {
+    pocket_boot_log("qemu_exit_hook");
+}
+
+static int pocket_qemu_hook_armed = 0;
+
 int pocket_qemu_run(const char *dylib_path, int argc, const char **argv) {
+    // Arm the atexit hook once per process lifetime. atexit is idempotent
+    // in effect but pushes duplicate entries onto its LIFO stack, so we
+    // guard here.
+    if (!pocket_qemu_hook_armed) {
+        atexit(pocket_qemu_atexit_hook);
+        pocket_qemu_hook_armed = 1;
+        pocket_boot_log("qemu_atexit_armed");
+    }
+
+    pocket_boot_log("qemu_bootstrap_dlopen_start");
     void *dl = dlopen(dylib_path, RTLD_LOCAL | RTLD_LAZY | RTLD_FIRST);
     if (!dl) {
+        pocket_boot_log("qemu_bootstrap_dlopen_failed");
         fprintf(stderr, "pocket-claude: dlopen(%s) failed: %s\n",
                 dylib_path, dlerror());
         return -1;
     }
+    pocket_boot_log("qemu_bootstrap_dlopen_ok");
+
     qemu_init_fn q_init = (qemu_init_fn) dlsym(dl, "qemu_init");
     qemu_main_loop_fn q_loop = (qemu_main_loop_fn) dlsym(dl, "qemu_main_loop");
     qemu_cleanup_fn q_cleanup = (qemu_cleanup_fn) dlsym(dl, "qemu_cleanup");
     if (!q_init || !q_loop || !q_cleanup) {
+        pocket_boot_log("qemu_bootstrap_dlsym_failed");
         fprintf(stderr, "pocket-claude: dlsym failed: %s\n", dlerror());
         return -2;
     }
+    pocket_boot_log("qemu_bootstrap_dlsym_ok");
+
     const char *envp[] = { NULL };
+    pocket_boot_log("qemu_init_call");
     q_init(argc, argv, envp);
+    // If we reach here, qemu_init returned without exit()ing. Rare but
+    // it does happen on some paths.
+    pocket_boot_log("qemu_init_return");
+
+    pocket_boot_log("qemu_main_loop_entered");
     q_loop();
+    pocket_boot_log("qemu_main_loop_returned");
     q_cleanup();
     return 0;
 }
@@ -58,8 +93,10 @@ typedef size_t (*ZSTD_DStreamOutSize_fn)(void);
 int pocket_zstd_decompress_file(const char *framework_path,
                                 const char *src_path,
                                 const char *dst_path) {
+    pocket_boot_log("zstd_decompress_start");
     void *dl = dlopen(framework_path, RTLD_LOCAL | RTLD_LAZY);
     if (!dl) {
+        pocket_boot_log("zstd_dlopen_failed");
         fprintf(stderr, "pocket-claude: dlopen zstd (%s) failed: %s\n",
                 framework_path, dlerror());
         return -1;
@@ -73,6 +110,7 @@ int pocket_zstd_decompress_file(const char *framework_path,
     ZSTD_DStreamInSize_fn      _inSize   = dlsym(dl, "ZSTD_DStreamInSize");
     ZSTD_DStreamOutSize_fn     _outSize  = dlsym(dl, "ZSTD_DStreamOutSize");
     if (!_create || !_free || !_init || !_decomp || !_isErr || !_inSize || !_outSize) {
+        pocket_boot_log("zstd_dlsym_failed");
         fprintf(stderr, "pocket-claude: zstd dlsym failed: %s\n", dlerror());
         return -2;
     }
@@ -112,5 +150,6 @@ done:
     free(inBuf); free(outBuf);
     fclose(fin); fclose(fout);
     if (rc != 0) unlink(dst_path);
+    pocket_boot_log(rc == 0 ? "zstd_decompress_ok" : "zstd_decompress_failed");
     return rc;
 }

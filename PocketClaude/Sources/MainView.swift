@@ -43,10 +43,63 @@ struct MainView: View {
 
     @ViewBuilder
     private var terminal: some View {
-        if let engine = env.engine {
-            TerminalHostView(engine: engine)
-        } else {
-            Color.black
+        ZStack {
+            if let engine = env.engine {
+                TerminalHostView(engine: engine)
+            } else {
+                Color.black
+            }
+            statusOverlay
+        }
+    }
+
+    @ViewBuilder
+    private var statusOverlay: some View {
+        switch env.vmState {
+        case .starting:
+            VStack(spacing: 12) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                Text("Launching QEMU...")
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                Text("Booting Alpine (interpreter mode is slow -- ~30-60s expected)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+            .padding(24)
+            .background(.black.opacity(0.85))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        case .error(let msg):
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.orange)
+                Text("VM error")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(msg)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button {
+                    env.startEngine()
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                        .padding(.horizontal, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
+            .padding(24)
+            .background(.black.opacity(0.9))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        case .stopped, .running:
+            EmptyView()
         }
     }
 

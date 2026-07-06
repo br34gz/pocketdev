@@ -35,29 +35,21 @@ final class PocketClaudeEnvironment: ObservableObject {
         "env_start_engine".withCString { pocket_boot_log($0) }
         stopEngine()
         let workspacePath = resolvedWorkspacePath()
-        _ = workspacePath  // unused in diagnostic build; keeps the resolver warm
         let real: any VMEngine
-        // v0.2.2 diagnostic build: force the stub engine unconditionally.
-        // The UTM framework path is deliberately unreachable so we can
-        // prove whether the sideload-launch crash lives in our own Swift
-        // or in the framework payload. Original guard, kept commented
-        // for the re-enable path:
-        //   if GuestAssets.isEmbedded && GuestAssets.qemuFrameworkPath() != nil {
-        //     let e = QEMUVMEngine(workspacePath: workspacePath); ...
-        //   }
-        real = StubVMEngine()
+        if GuestAssets.isEmbedded && GuestAssets.qemuFrameworkPath() != nil {
+            "env_pick_qemu_engine".withCString { pocket_boot_log($0) }
+            let e = QEMUVMEngine(workspacePath: workspacePath)
+            e.onAuthURL = { [weak self] url in
+                DispatchQueue.main.async { self?.pendingAuthURL = url }
+            }
+            real = e
+        } else {
+            "env_pick_stub_engine".withCString { pocket_boot_log($0) }
+            real = StubVMEngine()
+        }
         real.onStateChange = { [weak self] s in
             DispatchQueue.main.async { self?.vmState = s }
         }
-        // NOTE: previous versions installed a wrapper on `real.onOutput`
-        // here to tee bytes into the URL scanner. Two bugs made this a
-        // no-op AND a self-destructing closure that reset the callback:
-        //   1. TerminalHostView.makeUIView reassigns engine.onOutput
-        //      right after, overwriting our wrapper.
-        //   2. The wrapper set `real?.onOutput = originalOnOutput` on
-        //      each invocation, unhooking itself.
-        // Deferred URL scanning to a v0.2.4+ pass; for the diagnostic
-        // stub build it wasn't reachable anyway (no live claude URLs).
         engine = real
         real.start()
     }

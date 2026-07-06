@@ -9,13 +9,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write    # needed to create the GitHub Release
+  contents: write
 
 jobs:
   build:
     name: Build PocketClaude.ipa
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -46,51 +46,11 @@ jobs:
           xcodegen generate
           ls -la PocketClaude.xcodeproj/
 
-      # v0.2.7 — framework bisection layer "qemu" (the main event).
-      # 22 frameworks embedded total. This adds only qemu-aarch64-softmmu
-      # on top of v0.2.6's 21 (which all launched cleanly on device).
-      # All of qemu-aarch64-softmmu's @rpath deps are already present in
-      # the v0.2.6 set (pixman, jpeg, epoxy, gio, gobject, glib, zstd,
-      # slirp, spice-server, virglrenderer, gmodule) — verified via
-      # otool -L. VM engine still routed to stub — we're not dlopen'ing
-      # qemu yet, just testing whether dyld / amfid accept it at
-      # process start.
-      #
-      # None of these are dlopen'd by our code — the VM engine is still
-      # routed to the stub. The test is whether iOS amfid / the
-      # sideloader accept the combined 12-framework set at install and
-      # launch, on the way to identifying which of the 22 frameworks
-      # from v0.2.0/v0.2.1 caused the SIGHUP.
-      #
-      # v0.2.4 glib set (verified clean, from otool -L):
-      #   glib-2.0.0   -> iconv.2, intl.8
-      #   gio-2.0.0    -> glib, gobject, gmodule, intl
-      #   gobject-2.0.0 -> glib, ffi.8
-      #   gmodule-2.0.0 -> glib
-      #   iconv.2      -> (self)
-      #   intl.8       -> iconv.2
-      #   ffi.8        -> (self)
-      #
-      # v0.2.5 additions (verified clean on device):
-      #   pixman-1.0   -> (self)
-      #   jpeg.62      -> (self)
-      #   epoxy.0      -> (self)
-      #   crypto.1.1   -> (self)   [openssl 1.1 crypto lib]
-      #   ssl.1.1      -> crypto.1.1
-      #
-      # v0.2.6 additions (verified clean on device):
-      #   slirp.0, zstd.1, spice-server.1, virglrenderer.1, vulkan.1,
-      #   gstreamer-1.0.0, gstbase-1.0.0, gstapp-1.0.0, opus.0
-      #
-      # v0.2.7 addition (verified: deps closed inside v0.2.6 set):
-      #   qemu-aarch64-softmmu  191 MB
-      #     -> pixman, jpeg, epoxy, gio, gobject, glib, zstd, slirp,
-      #        spice-server, virglrenderer, gmodule
-      #
-      # If v0.2.7 crashes and v0.2.6 didn't: the offender is
-      # qemu-aarch64-softmmu specifically. Next iteration adds dyld_info
-      # -platform and otool -l output for the qemu framework so we can
-      # see MinimumOSVersion, LC_ATOM_INFO, C constructors etc.
+      # v0.3.0 - full build. All 22 UTM frameworks + the guest image.
+      # Bisection confirmed the full framework payload is amfid-safe
+      # (v0.2.4->v0.2.7 shipped cumulatively without launch crashes).
+      # The v0.2.0 launch failure is now attributed to qemu_init exit(2)
+      # on argv errors; v0.3.0 guards that with preflight + atexit hook.
 
       - name: Fetch UTM-SE (source of the iOS QEMU frameworks)
         env:
@@ -102,7 +62,7 @@ jobs:
           cd build/utm
           unzip -q UTM-SE.ipa
 
-      - name: Extract full framework set (glib + pixman_crypto + io_display + qemu)
+      - name: Extract full framework set (all 22)
         run: |
           mkdir -p build/staged-frameworks
           SRC="build/utm/Payload/UTM SE.app/Frameworks"
@@ -120,12 +80,30 @@ jobs:
               exit 1
             fi
           done
-          # Strip UTM's ad-hoc resource seals so codesign below emits
-          # fresh, macos-native ones instead of re-writing UTM's.
           find build/staged-frameworks -name _CodeSignature -type d \
               -exec rm -rf {} + 2>/dev/null || true
           du -sh build/staged-frameworks
-          ls build/staged-frameworks
+          ls build/staged-frameworks | wc -l
+
+      - name: Fetch guest image
+        id: guest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/guest
+          if gh release download guest-latest \
+               --repo "$GITHUB_REPOSITORY" \
+               --pattern 'alpine-claude.qcow2.zst' \
+               --pattern 'vmlinuz-virt' \
+               --pattern 'initramfs-virt' \
+               --dir build/guest; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            ls -lh build/guest
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::error::guest-latest release missing - v0.3.0 needs the alpine image"
+            exit 1
+          fi
 
       - name: Build archive (no signing)
         run: |
@@ -149,8 +127,11 @@ jobs:
           mkdir -p "$APP/Frameworks"
           cp -R build/staged-frameworks/* "$APP/Frameworks/"
 
-          # Same treatment as v0.2.1: strip and re-adhoc-sign every
-          # framework mach-O so the sideloader has a uniform baseline.
+          mkdir -p "$APP/GuestImage"
+          cp build/guest/* "$APP/GuestImage/"
+
+          # Adhoc-sign every framework mach-O + the app binary. Same
+          # treatment that v0.2.4-v0.2.7 shipped safely.
           echo "=== Framework signature normalization ==="
           for fw in "$APP/Frameworks"/*.framework; do
             name=$(basename "$fw" .framework)
@@ -158,15 +139,24 @@ jobs:
             if [[ -f "$bin" ]] && file "$bin" | grep -q "Mach-O"; then
               codesign --remove-signature "$bin" 2>/dev/null || true
               codesign --force --sign - --timestamp=none "$bin"
-              minos=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/{print $2; exit}')
-              echo "  $name  minos=$minos  signed=adhoc"
             fi
           done
           codesign --force --sign - --timestamp=none "$APP/PocketClaude"
           echo "=== Verification ==="
           codesign -dv "$APP" 2>&1 | head -5 || true
-          echo "=== .app contents ==="
-          ls -la "$APP"
+
+          cat > "$APP/QEMU-NOTICE.txt" <<'NOTICE'
+          This app bundle includes qemu-system-aarch64 and support libraries
+          from utmapp/UTM (UTM-SE.ipa, v5.0.3), licensed under GNU GPL v2.
+
+          Source code:
+            QEMU:  https://gitlab.com/qemu-project/qemu
+            UTM:   https://github.com/utmapp/UTM
+            Build: https://github.com/utmapp/UTM/releases/tag/v5.0.3
+
+          Pocket Claude itself is MIT-licensed; the combined redistributable
+          IPA is effectively GPL-2 due to the bundled QEMU components.
+          NOTICE
 
           mkdir -p build/Payload
           cp -R "$APP" build/Payload/
@@ -182,54 +172,43 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish as latest release (direct .ipa download)
+      - name: Publish as latest release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            FRAMEWORK BISECTION — layer "qemu" (the main event).
-            22 frameworks embedded — the full set from
-            utmapp/UTM v5.0.3 UTM-SE.ipa, ad-hoc re-signed.
+            v0.3.0 - the real thing.
 
-            HEADS UP — download size jumps from ~7 MB (v0.2.6) to
-            ~150 MB. That's qemu-aarch64-softmmu, the 191 MB QEMU
-            binary itself.
+            All 22 UTM QEMU frameworks + guest image (vmlinuz-virt +
+            initramfs-virt + alpine-claude.qcow2.zst) embedded. QEMUVMEngine
+            wired for real Alpine boot, with these guards against the
+            v0.2.0 launch crash mode (qemu_init exit(2) on argv errors):
 
-            v0.2.4-v0.2.6 set (all confirmed clean on device):
-              glib-2.0.0, gio-2.0.0, gobject-2.0.0, gmodule-2.0.0,
-              iconv.2, intl.8, ffi.8, pixman-1.0, jpeg.62, epoxy.0,
-              crypto.1.1, ssl.1.1, slirp.0, zstd.1, spice-server.1,
-              virglrenderer.1, vulkan.1, gstreamer-1.0.0,
-              gstbase-1.0.0, gstapp-1.0.0, opus.0  (21 total)
+              - preflight file-existence check on every argv path;
+                missing files become VMState.error(...) before
+                qemu_init is called
+              - atexit hook logs `qemu_exit_hook` before termination
+                so even a qemu-caused exit(2) leaves a breadcrumb
+              - 90s boot-timeout watchdog surfaces "Boot timeout" if
+                no console bytes arrive
+              - MainView shows a status overlay: "Launching QEMU..."
+                while starting, error card + Retry on failure
 
-            v0.2.7 addition (delta):
-              qemu-aarch64-softmmu   the actual QEMU binary
+            Boot log adds a lot of new phases; every step of the
+            engine start-up is timestamped in
+            Documents/pocket-claude-boot.log.
 
-            None are dlopen'd or LC_LOAD_DYLIB'd by our code — the VM
-            engine is still routed to the stub. Purely testing whether
-            iOS amfid / the sideloader accept the full 22-set at
-            install/launch. If v0.2.7 crashes and v0.2.6 didn't, we
-            have narrowed the offender to qemu-aarch64-softmmu itself.
+            SIZE: ~140 MB download, ~700 MB installed. First launch
+            decompresses alpine-claude.qcow2.zst into ~/Documents; can
+            take 10-15 seconds. Interpreter-mode boot to Alpine login
+            can be slow (30-60s expected, potentially longer without JIT).
 
-            IMPORTANT — DELETE THE PREVIOUS INSTALL FIRST:
-            Long-press icon → Remove App → Delete App before installing.
-            iOS caches signatures per bundle-ID; a plain reinstall can
-            inherit stale amfid state.
-
-            Expected outcome (if the framework is amfid-safe):
-            identical UI to v0.2.6 — launches to the wizard,
-            workspace picker works, Finish transitions to MainView
-            with the stub terminal. Boot log should show all four
-            layer markers (glib, pixman_crypto, io_display, qemu)
-            right after `dylib_ctor`.
-
-            If it crashes: the offender is qemu-aarch64-softmmu itself,
-            and the next build ships dyld_info + otool -l output for
-            that framework so we can see what dyld is choking on.
-
-            If it crashes: last line in the boot log tells us which
-            phase died. Copy it via the yellow banner → sheet → Copy.
+            IMPORTANT - DELETE THE PREVIOUS INSTALL FIRST:
+            Long-press icon -> Remove App -> Delete App. Old
+            Documents/alpine-claude.qcow2 from a partial install would
+            not need re-decompressing; a fresh install ensures a clean
+            qcow2.
 
             Commit: ${{ github.sha }}
             Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
