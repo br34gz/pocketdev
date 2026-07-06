@@ -53,6 +53,12 @@ jobs:
           zstd -19 -T0 alpine-claude.qcow2 -o alpine-claude.qcow2.zst
           ls -lh alpine-claude.qcow2 alpine-claude.qcow2.zst out/
 
+      - name: Read claude variant metadata
+        id: variant
+        run: |
+          echo "variant=$(cat out/claude-variant.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+          echo "version=$(cat out/claude-version.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+
       - name: Publish guest-latest release
         uses: softprops/action-gh-release@v2
         with:
@@ -61,12 +67,15 @@ jobs:
           body: |
             Alpine aarch64 guest image for Pocket Claude, built from guest/.
 
+            claude_variant: ${{ steps.variant.outputs.variant }}
+            claude_version: ${{ steps.variant.outputs.version }}
+
             Commit: ${{ github.sha }}
             Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             Assets:
-            - alpine-claude.qcow2.zst — root disk (zstd), decompress before use
-            - vmlinuz-virt / initramfs-virt — direct kernel boot files
+            - alpine-claude.qcow2.zst - root disk (zstd), decompress before use
+            - vmlinuz-virt / initramfs-virt - direct kernel boot files
           files: |
             alpine-claude.qcow2.zst
             out/vmlinuz-virt

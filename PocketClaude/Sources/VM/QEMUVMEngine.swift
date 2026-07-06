@@ -316,6 +316,21 @@ final class QEMUVMEngine: VMEngine {
                 logPhase("AUTH_URL_received")
                 DispatchQueue.main.async { [weak self] in self?.onAuthURL?(url) }
             }
+            return
+        }
+        if line.hasPrefix("CLAUDE_VARIANT ") {
+            // Guest reports which claude-install strategy the image v2
+            // build-time smoke test landed on. Values roughly match the
+            // build script's STRATEGIES entries, e.g.
+            //   apk:claude-code=2.1.108-r1
+            //   apk:claude-code
+            //   npm
+            //   none            (nothing survived; shell-only image)
+            let raw = String(line.dropFirst("CLAUDE_VARIANT ".count))
+            logPhase("claude_variant=\(raw)")
+            DispatchQueue.main.async {
+                PocketClaudeEnvironment.shared.guestClaudeVariant = raw
+            }
         }
     }
 

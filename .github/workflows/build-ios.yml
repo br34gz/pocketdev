@@ -270,7 +270,25 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.4.1 - dual-engine build (JIT + SE fallback).
+            v0.5.0 - guest image v2 (claude-code startup fix).
+
+            v0.4.1 booted Alpine end-to-end but claude 2.1.193
+            deterministically crashed at interactive startup with
+            "path ... without null bytes" - a Bun + Alpine musl +
+            aarch64 compat bug in the credential-provider chain.
+
+            v0.5.0 rebuilds the guest image with a smoke-tested install
+            path. build-rootfs.sh now tries a priority list of install
+            strategies (apk pinned to older versions, then latest apk,
+            then npm) and only publishes an image whose claude survives
+            a headless smoke test that checks for the null-bytes crash.
+
+            The selected strategy is exposed both in the guest's
+            /etc/pocket-claude-variant and via a new CLAUDE_VARIANT
+            control-channel line the app reads and logs.
+
+            Everything else (dual QEMU engine, entitlements, firmware,
+            socket paths, memory guards) unchanged from v0.4.1.
 
             v0.4.0 shipped only UTM.ipa's JIT-only qemu. On the user's
             LiveContainer + StikDebug setup the mmap MAP_JIT probe

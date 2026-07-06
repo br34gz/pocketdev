@@ -32,6 +32,10 @@ final class PocketClaudeEnvironment: ObservableObject {
     /// (or nil if never started). Drives the "expected boot time" copy
     /// on the status overlay.
     @Published var selectedVariant: String?
+    /// Which claude-install strategy the guest image landed on, as
+    /// broadcast over the control channel at boot. Values like
+    /// "apk:claude-code=2.1.108-r1", "npm", "none".
+    @Published var guestClaudeVariant: String?
 
     /// URL the guest just published; wizard step 3 offers Safari handoff.
     var latestAuthURL: URL? { pendingAuthURL }
