@@ -60,8 +60,8 @@ private struct BootLogView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    section(title: "pocket-claude-boot.log", body: boot)
-                    section(title: "pocket-claude-qemu-stderr.log", body: stderr)
+                    section(title: "pocketdev-boot.log", body: boot)
+                    section(title: "pocketdev-qemu-stderr.log", body: stderr)
                 }
                 .padding()
             }
@@ -95,8 +95,8 @@ private struct BootLogView: View {
     }
 
     private func reload() {
-        boot = readDoc("pocket-claude-boot.log")
-        stderr = readDoc("pocket-claude-qemu-stderr.log")
+        boot = readDoc("pocketdev-boot.log")
+        stderr = readDoc("pocketdev-qemu-stderr.log")
     }
 
     private func readDoc(_ name: String) -> String {

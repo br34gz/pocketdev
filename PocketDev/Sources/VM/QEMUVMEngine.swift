@@ -2,7 +2,7 @@ import Foundation
 
 /// Real VM engine: dlopens qemu-aarch64-softmmu.framework from the app
 /// bundle (extracted at CI time from UTM-SE.ipa - TCTI-interpreter build,
-/// matches Pocket Claude's accepted slow-mode fallback per spec sections
+/// matches PocketDev's accepted slow-mode fallback per spec sections
 /// 2 and 6) and runs it on a background thread. Speaks to the guest over
 /// unix-socket chardevs: console (serial console -> SwiftTerm), control
 /// (spec section 4.6 events), QMP (lifecycle pause/resume).
@@ -74,7 +74,7 @@ final class QEMUVMEngine: VMEngine {
         }
         logPhase("qemu_variant_selected=\(variant.name)")
         DispatchQueue.main.async {
-            PocketClaudeEnvironment.shared.selectedVariant = variant.name
+            PocketDevEnvironment.shared.selectedVariant = variant.name
         }
         let qemuPath = variant.path
         Self.isRunning = true
@@ -128,7 +128,7 @@ final class QEMUVMEngine: VMEngine {
                 // its pc-bios directory. CI now copies UTM's qemu/
                 // (minus the huge edk2-*.fd UEFI files we don't need
                 // for direct-kernel boot) into
-                // Payload/PocketClaude.app/qemu-firmware/.
+                // Payload/PocketDev.app/qemu-firmware/.
                 let romsDir = Bundle.main.bundleURL
                     .appendingPathComponent("qemu-firmware").path
                 logPhase("qemu_roms_dir=\(romsDir)")
@@ -265,7 +265,7 @@ final class QEMUVMEngine: VMEngine {
                 logPhase("first_serial_output")
                 DispatchQueue.main.async {
                     self.cancelBootTimeout()
-                    PocketClaudeEnvironment.shared.sessionSawSerial = true
+                    PocketDevEnvironment.shared.sessionSawSerial = true
                 }
             }
             self.onOutput?(bytes)
@@ -325,7 +325,7 @@ final class QEMUVMEngine: VMEngine {
             let raw = String(line.dropFirst("CLAUDE_VARIANT ".count))
             logPhase("claude_variant=\(raw)")
             DispatchQueue.main.async {
-                PocketClaudeEnvironment.shared.guestClaudeVariant = raw
+                PocketDevEnvironment.shared.guestClaudeVariant = raw
             }
             return
         }
@@ -334,7 +334,7 @@ final class QEMUVMEngine: VMEngine {
             let raw = String(line.dropFirst("GUEST_OS ".count))
             logPhase("guest_os=\(raw)")
             DispatchQueue.main.async {
-                PocketClaudeEnvironment.shared.guestOS = raw
+                PocketDevEnvironment.shared.guestOS = raw
             }
         }
     }
@@ -388,7 +388,7 @@ final class QEMUVMEngine: VMEngine {
         if path.utf8.count > 103 {
             logPhase("socket_path_too_long")
             logPhase("path=\(path) len=\(path.utf8.count)")
-            throw NSError(domain: "PocketClaude", code: 42, userInfo: [
+            throw NSError(domain: "PocketDev", code: 42, userInfo: [
                 NSLocalizedDescriptionKey:
                     "Unix socket path too long for Darwin (\(path.utf8.count) > 103 chars): \(path)"
             ])
@@ -441,7 +441,7 @@ final class QEMUVMEngine: VMEngine {
             appropriateFor: nil,
             create: true
         ) else { return nil }
-        return docs.appendingPathComponent("pocket-claude-qemu-stderr.log").path
+        return docs.appendingPathComponent("pocketdev-qemu-stderr.log").path
     }
 }
 

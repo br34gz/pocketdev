@@ -1,5 +1,5 @@
 // Boot log — early diagnostic. A __attribute__((constructor)) in
-// BootLog.c writes a `dylib_ctor` line to $HOME/Documents/pocket-claude-boot.log
+// BootLog.c writes a `dylib_ctor` line to $HOME/Documents/pocketdev-boot.log
 // before Swift startup runs, so we can distinguish pre-main dyld/amfid
 // crashes (no log file created at all) from Swift-side crashes (log file
 // exists with some entries but stops before the last-expected phase).

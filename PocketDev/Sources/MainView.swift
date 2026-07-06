@@ -2,7 +2,7 @@ import SwiftUI
 import SafariServices
 
 struct MainView: View {
-    @ObservedObject var env = PocketClaudeEnvironment.shared
+    @ObservedObject var env = PocketDevEnvironment.shared
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var showAuthSheet = false
     @State private var authSheetURL: URL?

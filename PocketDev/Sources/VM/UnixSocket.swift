@@ -14,7 +14,7 @@ final class UnixSocket {
     var onClose: ((Int32) -> Void)?
 
     init(label: String) {
-        self.readQueue = DispatchQueue(label: "com.br34gz.pocketclaude.sock.\(label)")
+        self.readQueue = DispatchQueue(label: "com.br34gz.pocketdev.sock.\(label)")
     }
 
     /// Connect to a unix socket at `path`, retrying briefly while qemu

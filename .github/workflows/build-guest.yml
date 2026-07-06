@@ -83,7 +83,7 @@ jobs:
           tag_name: guest-latest
           name: "Guest image (rolling)"
           body: |
-            Alpine aarch64 guest image for Pocket Claude, built from guest/.
+            Alpine aarch64 guest image for PocketDev, built from guest/.
 
             guest_os:       ${{ steps.variant.outputs.guest_os }}
             claude_variant: ${{ steps.variant.outputs.variant }}

@@ -41,7 +41,7 @@ func logBoot(_ phase: String) {
 }
 
 @main
-struct PocketClaudeApp: App {
+struct PocketDevApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
 
@@ -65,9 +65,9 @@ struct PocketClaudeApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
-                (PocketClaudeEnvironment.shared.engine as? QEMUVMEngine)?.pause()
+                (PocketDevEnvironment.shared.engine as? QEMUVMEngine)?.pause()
             case .active:
-                (PocketClaudeEnvironment.shared.engine as? QEMUVMEngine)?.resume()
+                (PocketDevEnvironment.shared.engine as? QEMUVMEngine)?.resume()
             default: break
             }
         }

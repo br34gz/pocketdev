@@ -13,10 +13,10 @@ final class StubVMEngine: VMEngine {
     var onStateChange: ((VMState) -> Void)?
 
     private var lineBuffer: [UInt8] = []
-    private let queue = DispatchQueue(label: "com.br34gz.pocketclaude.stubvm")
+    private let queue = DispatchQueue(label: "com.br34gz.pocketdev.stubvm")
     private var generation = 0
 
-    private static let prompt = "pocket-claude:stub$ "
+    private static let prompt = "pocketdev:stub$ "
 
     func start() {
         "stub_engine_start".withCString { pocket_boot_log($0) }

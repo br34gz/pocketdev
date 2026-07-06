@@ -31,7 +31,7 @@ static void write_line(const char *phase) {
     // pre-main constructor case where the sandbox may not have been
     // touched yet.
     mkdir(dir, 0755);
-    snprintf(path, sizeof(path), "%s/pocket-claude-boot.log", dir);
+    snprintf(path, sizeof(path), "%s/pocketdev-boot.log", dir);
     FILE *f = fopen(path, "a");
     if (!f) return;
     time_t t = time(NULL);

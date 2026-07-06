@@ -1,8 +1,8 @@
-# Project spec consumed by XcodeGen. Generates PocketClaude.xcodeproj.
+# Project spec consumed by XcodeGen. Generates PocketDev.xcodeproj.
 # Run locally: xcodegen generate
 # In CI: the build workflow installs XcodeGen then runs xcodegen generate before xcodebuild archive.
 
-name: PocketClaude
+name: PocketDev
 options:
   bundleIdPrefix: com.br34gz
   deploymentTarget:
@@ -21,7 +21,7 @@ settings:
   base:
     SWIFT_VERSION: "5.10"
     DEVELOPMENT_TEAM: ""
-    MARKETING_VERSION: "0.6.1"
+    MARKETING_VERSION: "0.7.0"
     CURRENT_PROJECT_VERSION: "1"
     GENERATE_INFOPLIST_FILE: NO
     CODE_SIGN_IDENTITY: ""
@@ -29,18 +29,18 @@ settings:
     CODE_SIGNING_ALLOWED: NO
 
 targets:
-  PocketClaude:
+  PocketDev:
     type: application
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: PocketClaude/Sources
-      - path: PocketClaude/Resources
+      - path: PocketDev/Sources
+      - path: PocketDev/Resources
         excludes:
           - Info.plist
-          - PocketClaude.entitlements
+          - PocketDev.entitlements
     resources:
-      - path: PocketClaude/Resources/Assets.xcassets
+      - path: PocketDev/Resources/Assets.xcassets
     dependencies:
       - package: SwiftTerm
     # Entitlements are not embedded in the unsigned build (CODE_SIGNING_ALLOWED=NO)
@@ -48,7 +48,7 @@ targets:
     # SideStore, AltStore) can apply them at re-sign time. The VM needs
     # increased-memory-limit + extended-virtual-addressing per spec section 3.
     entitlements:
-      path: PocketClaude/Resources/PocketClaude.entitlements
+      path: PocketDev/Resources/PocketDev.entitlements
       properties:
         # Memory ceiling entitlements matching UTM's own claim set. The
         # user's LiveContainer carries increased-memory-limit and it
@@ -65,7 +65,7 @@ targets:
         com.apple.security.cs.allow-jit: true
         get-task-allow: true
     info:
-      path: PocketClaude/Resources/Info.plist
+      path: PocketDev/Resources/Info.plist
       properties:
         CFBundleDisplayName: PocketDev
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
@@ -79,14 +79,14 @@ targets:
         UIRequiresFullScreen: false
         ITSAppUsesNonExemptEncryption: false
         # Diagnostic aid: expose the Documents/ folder in the iOS Files
-        # app so the user can retrieve pocket-claude-boot.log without a
+        # app so the user can retrieve pocketdev-boot.log without a
         # Mac tether. Cheap and always-on.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
     settings:
       base:
-        PRODUCT_NAME: PocketClaude
-        PRODUCT_BUNDLE_IDENTIFIER: com.br34gz.pocketclaude
+        PRODUCT_NAME: PocketDev
+        PRODUCT_BUNDLE_IDENTIFIER: com.br34gz.pocketdev
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         SWIFT_EMIT_LOC_STRINGS: YES
@@ -94,7 +94,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Bridging header exposes QEMUBootstrap.h (C) to Swift.
-        SWIFT_OBJC_BRIDGING_HEADER: PocketClaude/Sources/VM/PocketClaude-Bridging-Header.h
+        SWIFT_OBJC_BRIDGING_HEADER: PocketDev/Sources/VM/PocketDev-Bridging-Header.h
         # Frameworks/ is populated post-archive with UTM's qemu + deps.
         # iOS apps get @executable_path/Frameworks as an rpath by
         # default; explicit here for clarity.

@@ -28,7 +28,7 @@ enum GuestAssets {
     /// Throws on I/O or zstd error.
     static func materialize(progress: ((Double) -> Void)? = nil) throws -> Paths {
         guard let dir = bundleGuestDir else {
-            throw NSError(domain: "PocketClaude", code: 1, userInfo: [
+            throw NSError(domain: "PocketDev", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "No GuestImage/ in app bundle"
             ])
         }
@@ -47,7 +47,7 @@ enum GuestAssets {
         if !FileManager.default.fileExists(atPath: disk.path) {
             progress?(0.05)
             guard let frameworkPath = zstdFrameworkPath() else {
-                throw NSError(domain: "PocketClaude", code: 2, userInfo: [
+                throw NSError(domain: "PocketDev", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "zstd.1.framework not found in app"
                 ])
             }
@@ -64,7 +64,7 @@ enum GuestAssets {
                 }
             }
             if rc != 0 {
-                throw NSError(domain: "PocketClaude", code: 3, userInfo: [
+                throw NSError(domain: "PocketDev", code: 3, userInfo: [
                     NSLocalizedDescriptionKey: "zstd decompress failed rc=\(rc)"
                 ])
             }

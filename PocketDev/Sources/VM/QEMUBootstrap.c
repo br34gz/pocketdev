@@ -42,7 +42,7 @@ int pocket_qemu_run(const char *dylib_path, int argc, const char **argv) {
     void *dl = dlopen(dylib_path, RTLD_LOCAL | RTLD_LAZY | RTLD_FIRST);
     if (!dl) {
         pocket_boot_log("qemu_bootstrap_dlopen_failed");
-        fprintf(stderr, "pocket-claude: dlopen(%s) failed: %s\n",
+        fprintf(stderr, "pocketdev: dlopen(%s) failed: %s\n",
                 dylib_path, dlerror());
         return -1;
     }
@@ -53,7 +53,7 @@ int pocket_qemu_run(const char *dylib_path, int argc, const char **argv) {
     qemu_cleanup_fn q_cleanup = (qemu_cleanup_fn) dlsym(dl, "qemu_cleanup");
     if (!q_init || !q_loop || !q_cleanup) {
         pocket_boot_log("qemu_bootstrap_dlsym_failed");
-        fprintf(stderr, "pocket-claude: dlsym failed: %s\n", dlerror());
+        fprintf(stderr, "pocketdev: dlsym failed: %s\n", dlerror());
         return -2;
     }
     pocket_boot_log("qemu_bootstrap_dlsym_ok");
@@ -113,7 +113,7 @@ int pocket_zstd_decompress_file(const char *framework_path,
     void *dl = dlopen(framework_path, RTLD_LOCAL | RTLD_LAZY);
     if (!dl) {
         pocket_boot_log("zstd_dlopen_failed");
-        fprintf(stderr, "pocket-claude: dlopen zstd (%s) failed: %s\n",
+        fprintf(stderr, "pocketdev: dlopen zstd (%s) failed: %s\n",
                 framework_path, dlerror());
         return -1;
     }
@@ -127,7 +127,7 @@ int pocket_zstd_decompress_file(const char *framework_path,
     ZSTD_DStreamOutSize_fn     _outSize  = dlsym(dl, "ZSTD_DStreamOutSize");
     if (!_create || !_free || !_init || !_decomp || !_isErr || !_inSize || !_outSize) {
         pocket_boot_log("zstd_dlsym_failed");
-        fprintf(stderr, "pocket-claude: zstd dlsym failed: %s\n", dlerror());
+        fprintf(stderr, "pocketdev: zstd dlsym failed: %s\n", dlerror());
         return -2;
     }
 
@@ -151,7 +151,7 @@ int pocket_zstd_decompress_file(const char *framework_path,
             ZSTD_outBuffer output = { outBuf, outBufSize, 0 };
             size_t r = _decomp(ds, &output, &input);
             if (_isErr(r)) {
-                fprintf(stderr, "pocket-claude: zstd error: %s\n", _errName(r));
+                fprintf(stderr, "pocketdev: zstd error: %s\n", _errName(r));
                 rc = -5; goto done;
             }
             if (output.pos > 0) {

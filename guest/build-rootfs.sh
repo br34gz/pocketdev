@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the Debian bookworm aarch64 guest rootfs for Pocket Claude.
+# Builds the Debian bookworm aarch64 guest rootfs for PocketDev.
 # Runs INSIDE a debian:12-slim arm64 container (via qemu binfmt on the
 # CI runner). Produces /out/rootfs.tar plus kernel + initramfs for
 # direct kernel boot.
@@ -55,23 +55,23 @@ CLAUDE_VARIANT="npm:@anthropic-ai/claude-code@${CLAUDE_VERSION}"
 
 # --- Guest OS configuration ---------------------------------------------
 
-echo pocket-claude > /etc/hostname
-echo debian-12 > /etc/pocket-claude-os
-echo "$CLAUDE_VARIANT" > /etc/pocket-claude-variant
-echo "$CLAUDE_VERSION" > /etc/pocket-claude-version
+echo pocketdev > /etc/hostname
+echo debian-12 > /etc/pocketdev-os
+echo "$CLAUDE_VARIANT" > /etc/pocketdev-variant
+echo "$CLAUDE_VERSION" > /etc/pocketdev-version
 
-# claude user
-useradd -m -s /bin/bash claude
-passwd -d claude || true
+# dev user
+useradd -m -s /bin/bash dev
+passwd -d dev || true
 
 # Autologin: bypass systemd's init entirely. Both v0.6.0's serial-getty
 # override and v0.6.1's pocket-console.service failed to preempt the
 # systemd-getty-generator's auto-spawn of serial-getty@ttyAMA0 (the
-# `pocket-claude login:` prompt from agetty kept winning the tty). Ship
+# `pocketdev login:` prompt from agetty kept winning the tty). Ship
 # our own /pocket-init as the kernel's PID 1: it handles the minimum
 # viable Linux userspace we need (proc/sys/dev mounts, loopback, DHCP,
 # 9p workspace mount, control-channel emit) then execs bash as the
-# claude user with a fresh login shell that sources ~/.profile.
+# dev user with a fresh login shell that sources ~/.profile.
 #
 # systemd is still installed for the odd shell utility we may want
 # later, but we never run it as init - the kernel append gets
@@ -116,23 +116,23 @@ mount -t 9p -o trans=virtio,version=9p2000.L,msize=512000 workspace /workspace 2
 if [ -e /dev/hvc0 ]; then
     (
         echo "BOOT_OK"
-        [ -f /etc/pocket-claude-variant ] && echo "CLAUDE_VARIANT $(cat /etc/pocket-claude-variant)"
-        [ -f /etc/pocket-claude-os ]      && echo "GUEST_OS $(cat /etc/pocket-claude-os)"
+        [ -f /etc/pocketdev-variant ] && echo "CLAUDE_VARIANT $(cat /etc/pocketdev-variant)"
+        [ -f /etc/pocketdev-os ]      && echo "GUEST_OS $(cat /etc/pocketdev-os)"
     ) > /dev/hvc0 2>/dev/null &
 fi
 
-# Hand the console over to the user's shell. login(1) -f claude:
+# Hand the console over to the user's shell. login(1) -f dev:
 #   - skips password auth
 #   - preserves ~/.profile execution
 #   - creates a real login session with proper $HOME etc
 # setsid --ctty gives login a controlling tty so signals + job control
 # work correctly.
-cd /home/claude 2>/dev/null || cd /
+cd /home/dev 2>/dev/null || cd /
 
 # On PID 1 we need to become the session leader on our ctty. The
 # kernel already has /dev/console wired to ttyAMA0 (because of the
 # console=ttyAMA0 kernel arg), so our stdin/stdout/stderr are that.
-exec setsid --ctty /bin/login -f claude </dev/console >/dev/console 2>&1
+exec setsid --ctty /bin/login -f dev </dev/console >/dev/console 2>&1
 INIT_EOF
 chmod +x /pocket-init
 
@@ -154,18 +154,18 @@ mkdir -p /etc/profile.d
 cat > /etc/profile.d/claude.sh <<'EOF'
 export USE_BUILTIN_RIPGREP=0
 EOF
-mkdir -p /home/claude/.claude
-cat > /home/claude/.claude/settings.json <<'EOF'
+mkdir -p /home/dev/.claude
+cat > /home/dev/.claude/settings.json <<'EOF'
 {"env": {"USE_BUILTIN_RIPGREP": "0"}}
 EOF
 
 # Login profile
-cat > /home/claude/.profile <<'EOF'
+cat > /home/dev/.profile <<'EOF'
 cd /workspace 2>/dev/null || cd "$HOME"
-if [ -f /etc/pocket-claude-variant ]; then
-    echo "Pocket Claude guest image"
-    echo "  guest_os=$(cat /etc/pocket-claude-os 2>/dev/null || echo unknown)"
-    echo "  claude_variant=$(cat /etc/pocket-claude-variant)"
+if [ -f /etc/pocketdev-variant ]; then
+    echo "PocketDev guest image"
+    echo "  guest_os=$(cat /etc/pocketdev-os 2>/dev/null || echo unknown)"
+    echo "  claude_variant=$(cat /etc/pocketdev-variant)"
 fi
 if command -v claude >/dev/null 2>&1; then
     if VERSION_OUT=$(claude --version 2>&1); then
@@ -176,21 +176,21 @@ if command -v claude >/dev/null 2>&1; then
         echo "$VERSION_OUT"
     fi
 fi
-if command -v claude >/dev/null 2>&1 && [ -z "$POCKET_CLAUDE_STARTED" ]; then
-    export POCKET_CLAUDE_STARTED=1
+if command -v claude >/dev/null 2>&1 && [ -z "$POCKETDEV_STARTED" ]; then
+    export POCKETDEV_STARTED=1
     if ! claude; then
         RC=$?
         echo ""
         echo "claude exited unexpectedly (rc=$RC)."
         echo "Debug:"
         echo "  claude --version"
-        echo "  cat /etc/pocket-claude-variant"
-        echo "  cat /etc/pocket-claude-os"
+        echo "  cat /etc/pocketdev-variant"
+        echo "  cat /etc/pocketdev-os"
         echo ""
     fi
 fi
 EOF
-chown -R claude:claude /home/claude
+chown -R dev:dev /home/dev
 
 # Control channel is now emitted directly by /pocket-init (see above),
 # so no separate service is needed. The systemd unit that used to live

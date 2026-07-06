@@ -1,6 +1,6 @@
 // Bootstrap for qemu-aarch64-softmmu loaded from an embedded framework.
 // The frameworks come from UTM-SE.ipa (TCTI-interpreter build, matches
-// Pocket Claude's accepted "slow mode" - spec sections 2 and 6). Entry
+// PocketDev's accepted "slow mode" - spec sections 2 and 6). Entry
 // points are qemu_init(argc, argv, envp) followed by a blocking
 // qemu_main_loop(); patterned on utmapp/UTM's QEMULauncher/Bootstrap.c.
 //

@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    name: Build PocketClaude.ipa
+    name: Build PocketDev.ipa
     runs-on: macos-26
     timeout-minutes: 40
 
@@ -30,7 +30,7 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "PocketClaude v$VERSION (build ${{ github.run_number }})"
+          echo "PocketDev v$VERSION (build ${{ github.run_number }})"
 
       - name: Select Xcode (latest 26.x)
         run: |
@@ -44,7 +44,7 @@ jobs:
       - name: Generate Xcode project
         run: |
           xcodegen generate
-          ls -la PocketClaude.xcodeproj/
+          ls -la PocketDev.xcodeproj/
 
       # v0.4.1 - dual-engine build.
       # v0.4.0 shipped only UTM.ipa's JIT qemu; user's StikDebug couldn't
@@ -125,7 +125,7 @@ jobs:
             # Distinct CFBundleIdentifier so re-signers don't flag two
             # frameworks with the same identifier (which the raw upstream
             # bundles share as com.utmapp.qemu-aarch64-softmmu).
-            plutil -replace CFBundleIdentifier -string "com.br34gz.pocketclaude.${new}" "$dest/Info.plist"
+            plutil -replace CFBundleIdentifier -string "com.br34gz.pocketdev.${new}" "$dest/Info.plist"
             # Sanity check.
             file "$dest/${new}" | head -1
           }
@@ -176,11 +176,11 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project PocketClaude.xcodeproj \
-            -scheme PocketClaude \
+            -project PocketDev.xcodeproj \
+            -scheme PocketDev \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath build/PocketClaude.xcarchive \
+            -archivePath build/PocketDev.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -189,7 +189,7 @@ jobs:
 
       - name: Package unsigned IPA
         run: |
-          APP=build/PocketClaude.xcarchive/Products/Applications/PocketClaude.app
+          APP=build/PocketDev.xcarchive/Products/Applications/PocketDev.app
 
           mkdir -p "$APP/Frameworks"
           cp -R build/staged-frameworks/* "$APP/Frameworks/"
@@ -223,19 +223,19 @@ jobs:
           # carried through, giving the paired signer visibility into
           # what to grant. XcodeGen generates the .entitlements file at
           # `entitlements.path` from the properties block in project.yml.
-          ENTS=PocketClaude/Resources/PocketClaude.entitlements
+          ENTS=PocketDev/Resources/PocketDev.entitlements
           if [[ -f "$ENTS" ]]; then
             echo "=== Entitlements being applied ==="
             plutil -p "$ENTS" | head -20
             codesign --force --sign - --timestamp=none \
-              --entitlements "$ENTS" "$APP/PocketClaude"
+              --entitlements "$ENTS" "$APP/PocketDev"
           else
             echo "::warning::entitlements file $ENTS missing; signing without"
-            codesign --force --sign - --timestamp=none "$APP/PocketClaude"
+            codesign --force --sign - --timestamp=none "$APP/PocketDev"
           fi
           echo "=== Verification ==="
           codesign -dv "$APP" 2>&1 | head -5 || true
-          codesign -d --entitlements - "$APP/PocketClaude" 2>&1 | head -30 || true
+          codesign -d --entitlements - "$APP/PocketDev" 2>&1 | head -30 || true
 
           cat > "$APP/QEMU-NOTICE.txt" <<'NOTICE'
           This app bundle includes qemu-system-aarch64 and support libraries
@@ -246,21 +246,21 @@ jobs:
             UTM:   https://github.com/utmapp/UTM
             Build: https://github.com/utmapp/UTM/releases/tag/v5.0.3
 
-          Pocket Claude itself is MIT-licensed; the combined redistributable
+          PocketDev itself is MIT-licensed; the combined redistributable
           IPA is effectively GPL-2 due to the bundled QEMU components.
           NOTICE
 
           mkdir -p build/Payload
           cp -R "$APP" build/Payload/
           cd build
-          /usr/bin/zip -qry PocketClaude-unsigned.ipa Payload/
-          ls -lh PocketClaude-unsigned.ipa
+          /usr/bin/zip -qry PocketDev-unsigned.ipa Payload/
+          ls -lh PocketDev-unsigned.ipa
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PocketClaude-unsigned-ipa
-          path: build/PocketClaude-unsigned.ipa
+          name: PocketDev-unsigned-ipa
+          path: build/PocketDev-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
 
@@ -268,27 +268,42 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
-          name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
+          name: "PocketDev v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.6.1 - Debian glibc guest with a working autologin.
+            PocketDev v0.7.0 - full rename from Pocket Claude.
 
-            v0.6.0 shipped UI/rename/icon polish but the Debian guest
-            wasn't publishable - serial-getty override's --autologin
-            arg never landed and the interactive smoke test timed out.
-            v0.6.1 skips the getty template layer entirely: masks
-            serial-getty@ttyAMA0 so it can't fight for the tty, and
-            runs a custom pocket-console.service that invokes
-            /bin/login -f claude on ttyAMA0 directly. login(1) -f
-            skips password auth and still sources ~/.profile, so all
-            our env probes + interactive claude launch happen the
-            same way they did in v0.5.x.
+            IMPORTANT: existing installs need to be uninstalled and
+            reinstalled. The bundle identifier changed from
+            com.br34gz.pocketclaude to com.br34gz.pocketdev, so iOS
+            treats this as a separate app. Long-press the old icon,
+            Remove App, Delete App, then sideload this IPA fresh.
 
-            Guest CI smoke test unchanged: still watches interactive
-            claude for 60s after the version probe, still fails the
-            guest release if the null-bytes/TypeError/Module-not-found
-            marker fires.
+            What's actually new in v0.7.0:
 
-            iOS build is unchanged from v0.6.0-build.29.
+            - Rename: bundle id, Xcode scheme, project name, sources
+              directory, entitlements filename, Swift App/Environment
+              type names, IPA filename, .app directory, and every
+              user-visible string all now say PocketDev.
+            - Guest OS: Debian 12 (bookworm) with glibc. Confirmed the
+              null-bytes TypeError from earlier claude-code crashes
+              was musl-specific - interactive claude survives the
+              60s smoke test window cleanly on glibc.
+            - Guest init: bypasses systemd entirely. Kernel loads
+              /pocket-init as PID 1; that script mounts proc/sys/dev,
+              brings up loopback + DHCP, mounts /workspace 9p, emits
+              BOOT_OK on the control channel, then execs
+              'setsid --ctty /bin/login -f dev' on the console tty.
+              (Both the systemd getty template override in v0.6.0 and
+              the pocket-console.service in v0.6.1 lost the tty race
+              to systemd-getty-generator's auto-spawned agetty.)
+            - Guest user renamed claude -> dev; hostname pocket-claude
+              -> pocketdev; /etc/pocket-claude-* -> /etc/pocketdev-*.
+            - Boot log filename: pocketdev-boot.log (was
+              pocket-claude-boot.log).
+
+            Everything from v0.6.0 still applies (dual JIT+SE QEMU
+            engine, entitlements, socket paths, memory guards,
+            single-screen wizard, JIT dot, debug toggle, new icon).
 
             Both v0.5.0 (apk claude 2.1.108, Bun-compiled) and v0.5.1
             (npm claude 2.1.201, Node-compiled) crashed interactively
@@ -346,7 +361,7 @@ jobs:
             a headless smoke test that checks for the null-bytes crash.
 
             The selected strategy is exposed both in the guest's
-            /etc/pocket-claude-variant and via a new CLAUDE_VARIANT
+            /etc/pocketdev-variant and via a new CLAUDE_VARIANT
             control-channel line the app reads and logs.
 
             Everything else (dual QEMU engine, entitlements, firmware,
@@ -452,7 +467,7 @@ jobs:
             Two fixes shipped together:
             1. Bundle UTM's qemu firmware directory (12 MB, sans
                edk2-*.fd UEFI blobs we don't need for direct kernel
-               boot) at Payload/PocketClaude.app/qemu-firmware/, and
+               boot) at Payload/PocketDev.app/qemu-firmware/, and
                add `-L <that-path>` early in the qemu argv so it can
                find the ROMs.
             2. Switch from virtio-net-pci to virtio-net-device (MMIO)
@@ -478,7 +493,7 @@ jobs:
               with single-char names ("c", "k", "q"). Length checked
               against 103 chars before qemu is invoked; overflows
               surface as VMState.error.
-            - stderr redirected to Documents/pocket-claude-qemu-stderr.log
+            - stderr redirected to Documents/pocketdev-qemu-stderr.log
               before qemu_init, capturing the actual error message
               QEMU prints before exit().
             - Console-socket connect delayed 500ms so retries don't
@@ -505,7 +520,7 @@ jobs:
 
             Boot log adds a lot of new phases; every step of the
             engine start-up is timestamped in
-            Documents/pocket-claude-boot.log.
+            Documents/pocketdev-boot.log.
 
             SIZE: ~140 MB download, ~700 MB installed. First launch
             decompresses alpine-claude.qcow2.zst into ~/Documents; can
@@ -522,8 +537,8 @@ jobs:
             Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
             Permanent latest-build URL:
-            https://github.com/${{ github.repository }}/releases/latest/download/PocketClaude-unsigned.ipa
-          files: build/PocketClaude-unsigned.ipa
+            https://github.com/${{ github.repository }}/releases/latest/download/PocketDev-unsigned.ipa
+          files: build/PocketDev-unsigned.ipa
           make_latest: true
           draft: false
           prerelease: false

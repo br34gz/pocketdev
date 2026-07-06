@@ -4,7 +4,7 @@ import SwiftUI
 /// Shared, observable state that both the wizard and main view read/write:
 /// which VM engine to hand the terminal, workspace URL, auth handoff URL.
 ///
-/// Exposed via a process-wide singleton (`PocketClaudeEnvironment.shared`)
+/// Exposed via a process-wide singleton (`PocketDevEnvironment.shared`)
 /// rather than SwiftUI's environment plumbing. v0.2.2 confirmed the app
 /// itself launches; v0.2.2 also crashed when the wizard's "Finish" button
 /// flipped `setupComplete` and the RootView swapped from SetupWizardView
@@ -17,8 +17,8 @@ import SwiftUI
 /// view init and Swift-6 strict concurrency will crash at launch if the
 /// environment is annotated. All publishes happen through DispatchQueue
 /// .main hops instead.
-final class PocketClaudeEnvironment: ObservableObject {
-    static let shared = PocketClaudeEnvironment()
+final class PocketDevEnvironment: ObservableObject {
+    static let shared = PocketDevEnvironment()
 
     @Published private(set) var engine: (any VMEngine)?
     @Published var pendingAuthURL: URL?
