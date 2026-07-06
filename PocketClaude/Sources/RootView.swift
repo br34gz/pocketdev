@@ -17,8 +17,7 @@ struct RootView: View {
     }
 }
 
-/// v0.2.3 diagnostic banner. Tap to view the boot log inline — saves the
-/// user having to open Files.
+/// Diagnostic banner. Tap to view boot log + QEMU stderr inline.
 private struct DiagnosticBanner: View {
     @Binding var showBootLog: Bool
     var body: some View {
@@ -27,7 +26,7 @@ private struct DiagnosticBanner: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "stethoscope")
-                Text("v0.2.3 diagnostic. Tap for boot log.")
+                Text("Diagnostics. Tap for boot log + QEMU stderr.")
                     .font(.caption2)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
@@ -46,18 +45,19 @@ private struct DiagnosticBanner: View {
 
 private struct BootLogView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var content: String = "(reading...)"
+    @State private var boot: String = "(reading...)"
+    @State private var stderr: String = "(reading...)"
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(content)
-                    .font(.system(.footnote, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                VStack(alignment: .leading, spacing: 16) {
+                    section(title: "pocket-claude-boot.log", body: boot)
+                    section(title: "pocket-claude-qemu-stderr.log", body: stderr)
+                }
+                .padding()
             }
-            .navigationTitle("pocket-claude-boot.log")
+            .navigationTitle("Diagnostics")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -65,7 +65,8 @@ private struct BootLogView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Copy") {
-                        UIPasteboard.general.string = content
+                        UIPasteboard.general.string =
+                            "=== boot log ===\n\(boot)\n\n=== qemu stderr ===\n\(stderr)"
                     }
                 }
             }
@@ -73,21 +74,36 @@ private struct BootLogView: View {
         }
     }
 
+    private func section(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(body)
+                .font(.system(.footnote, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func reload() {
+        boot = readDoc("pocket-claude-boot.log")
+        stderr = readDoc("pocket-claude-qemu-stderr.log")
+    }
+
+    private func readDoc(_ name: String) -> String {
         guard let docs = try? FileManager.default.url(
                 for: .documentDirectory,
                 in: .userDomainMask,
                 appropriateFor: nil,
                 create: false
               ) else {
-            content = "(no Documents directory)"
-            return
+            return "(no Documents directory)"
         }
-        let path = docs.appendingPathComponent("pocket-claude-boot.log").path
+        let path = docs.appendingPathComponent(name).path
         guard let data = try? String(contentsOfFile: path, encoding: .utf8) else {
-            content = "(log file not present yet)"
-            return
+            return "(not present yet)"
         }
-        content = data.isEmpty ? "(log file empty)" : data
+        return data.isEmpty ? "(empty)" : data
     }
 }

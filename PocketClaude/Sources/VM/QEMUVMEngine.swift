@@ -98,11 +98,14 @@ final class QEMUVMEngine: VMEngine {
 
                 let dir = try self.prepareRuntimeDir()
                 self.runtimeDir = dir
+                logPhase("qemu_runtime_dir=\(dir.path)")
                 logPhase("qemu_runtime_dir_ready")
 
-                let consolePath = dir.appendingPathComponent("console.sock").path
-                let controlPath = dir.appendingPathComponent("control.sock").path
-                let qmpPath = dir.appendingPathComponent("qmp.sock").path
+                // Single-char names to stay under sun_path 103-char limit.
+                let consolePath = try self.socketPath(dir: dir, name: "c")
+                let controlPath = try self.socketPath(dir: dir, name: "k")
+                let qmpPath     = try self.socketPath(dir: dir, name: "q")
+                logPhase("socket_paths_ok")
 
                 // -display none suppresses SDL/Cocoa init. -nodefaults +
                 // -no-user-config for a stripped baseline; every device
@@ -138,16 +141,23 @@ final class QEMUVMEngine: VMEngine {
                 }
 
                 logPhase("qemu_argv_ready")
-                // Also log the argv itself so we can see exactly what
-                // qemu got if it dies inside qemu_init.
                 self.logArgv(args)
 
-                // Arm the boot-timeout watchdog on the main queue so a
-                // hung boot surfaces to the user as an error state,
-                // even if qemu itself is happily spinning.
+                // v0.3.1: capture qemu stderr to a file so a crash inside
+                // qemu_init leaves the actual error message behind.
+                let stderrPath = self.stderrLogPath()
+                if let stderrPath {
+                    let rc = stderrPath.withCString { pocket_qemu_redirect_stderr($0) }
+                    logPhase(rc == 0 ? "stderr_redirected" : "stderr_redirect_failed")
+                }
+
                 DispatchQueue.main.async { self.armBootTimeout() }
 
-                DispatchQueue.global(qos: .userInitiated).async {
+                // v0.3.1: delay the initial socket-connect attempts so
+                // we don't spam "connect_failed" while qemu is still
+                // binding. UnixSocket.connect already retries, so a
+                // slight lead is enough.
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.5) {
                     self.connectSockets(consolePath: consolePath,
                                         controlPath: controlPath,
                                         qmpPath: qmpPath)
@@ -270,15 +280,39 @@ final class QEMUVMEngine: VMEngine {
     }
 
     private func prepareRuntimeDir() throws -> URL {
-        // Caches/qemu-rt. Unix socket paths are capped at 104 chars on
-        // Darwin, so keep this short.
-        let base = try FileManager.default.url(
-            for: .cachesDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        ).appendingPathComponent("qemu-rt")
-        try? FileManager.default.removeItem(at: base)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // v0.3.1: Darwin's sockaddr_un.sun_path is capped at 104 chars
+        // including nul. v0.3.0 placed sockets under Documents/, which
+        // becomes 140+ chars once the app container UUID + LiveContainer's
+        // Documents/Data/Application/<guest-uuid>/ nesting is factored
+        // in - QEMU's bind() fails and it exit(2)s.
+        //
+        // NSTemporaryDirectory() is the shortest path we can reach that
+        // is app-writable. Combined with single-char socket filenames
+        // ("c", "k", "q") this stays under the limit on both plain
+        // sideloads and LiveContainer setups.
+        let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        // Don't nest a subdir - every extra path component costs us.
+        // The launcher itself owns the sockets by unique name in tmp.
         return base
+    }
+
+    /// Return a socket path under runtime dir, guarded against Darwin's
+    /// sun_path limit. Throws if the resulting path would not bind.
+    private func socketPath(dir: URL, name: String) throws -> String {
+        let path = dir.appendingPathComponent(name).path
+        // 104 - 1 (nul) = 103 char usable budget.
+        if path.utf8.count > 103 {
+            logPhase("socket_path_too_long")
+            logPhase("path=\(path) len=\(path.utf8.count)")
+            throw NSError(domain: "PocketClaude", code: 42, userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Unix socket path too long for Darwin (\(path.utf8.count) > 103 chars): \(path)"
+            ])
+        }
+        // Also remove any stale socket from a previous crashed run;
+        // qemu's bind() fails with EADDRINUSE otherwise.
+        try? FileManager.default.removeItem(atPath: path)
+        return path
     }
 
     // MARK: - Boot timeout watchdog
@@ -306,12 +340,24 @@ final class QEMUVMEngine: VMEngine {
     // MARK: - Boot log helpers
 
     private func logArgv(_ args: [String]) {
-        // Each arg logged on its own line, prefixed so we can grep them
-        // out later. Boot log is append-only text; keep entries short.
+        // v0.3.1: log the full arg without truncation. Some socket paths
+        // are 100+ chars and truncating them hid the sun_path overrun
+        // in v0.3.0.
         for (i, a) in args.enumerated() {
-            let trimmed = a.count > 120 ? String(a.prefix(117)) + "..." : a
-            logPhase("argv[\(i)]=\(trimmed)")
+            logPhase("argv[\(i)]=\(a)")
         }
+    }
+
+    /// Path we redirect qemu stderr into. Sits next to the boot log so
+    /// the in-app viewer can show it too.
+    private func stderrLogPath() -> String? {
+        guard let docs = try? FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else { return nil }
+        return docs.appendingPathComponent("pocket-claude-qemu-stderr.log").path
     }
 }
 

@@ -71,6 +71,21 @@ int pocket_qemu_run(const char *dylib_path, int argc, const char **argv) {
     return 0;
 }
 
+// ---------------------------------------------------------------- stderr
+
+int pocket_qemu_redirect_stderr(const char *path) {
+    // v0.3.0 boot log showed qemu_init_call -> qemu_exit_hook with no
+    // qemu_init_return: qemu called exit() from inside its argv parser,
+    // most likely on a socket-bind failure whose actual error message
+    // only exists on stderr. This redirects stderr to a file so the
+    // next crash leaves the real error string behind.
+    if (!freopen(path, "w", stderr)) {
+        return -1;
+    }
+    setvbuf(stderr, NULL, _IONBF, 0);
+    return 0;
+}
+
 // ---------------------------------------------------------------- zstd
 
 // libzstd streaming decompression API; declared here as the shape we

@@ -178,7 +178,29 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.3.0 - the real thing.
+            v0.3.1 - fix qemu_init exit(2) on socket bind failure.
+
+            v0.3.0's boot log terminated at qemu_init_call -> qemu_exit_hook,
+            confirming qemu_init exit()ed inside argv parsing. Culprit:
+            unix socket paths under Documents/ + LiveContainer's nested
+            Data/Application/<uuid>/ prefix pushed the paths past
+            Darwin's 104-char sun_path limit, so QEMU's bind() failed
+            and it exit(1)'d.
+
+            Fixes:
+            - Socket paths now sit directly in NSTemporaryDirectory()
+              with single-char names ("c", "k", "q"). Length checked
+              against 103 chars before qemu is invoked; overflows
+              surface as VMState.error.
+            - stderr redirected to Documents/pocket-claude-qemu-stderr.log
+              before qemu_init, capturing the actual error message
+              QEMU prints before exit().
+            - Console-socket connect delayed 500ms so retries don't
+              race qemu's bind().
+            - Full argv logged (no truncation) so socket paths are
+              visible in the boot log.
+            - Diagnostic sheet now shows both the boot log AND the
+              qemu stderr file. Copy button captures both.
 
             All 22 UTM QEMU frameworks + guest image (vmlinuz-virt +
             initramfs-virt + alpine-claude.qcow2.zst) embedded. QEMUVMEngine

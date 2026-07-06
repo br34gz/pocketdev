@@ -33,6 +33,12 @@ int pocket_zstd_decompress_file(const char *zstd_framework_path,
                                 const char *src_path,
                                 const char *dst_path);
 
+// Redirect the current process's stderr to a file. Used to capture QEMU's
+// error messages before qemu_init exit(2)s us, so we can see what
+// actually failed (bad argv path, unbindable socket, unsupported
+// device, etc). Returns 0 on success, -1 on freopen failure.
+int pocket_qemu_redirect_stderr(const char *path);
+
 #ifdef __cplusplus
 }
 #endif
