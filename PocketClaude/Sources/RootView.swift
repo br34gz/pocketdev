@@ -2,11 +2,14 @@ import SwiftUI
 
 struct RootView: View {
     @AppStorage("setupComplete") private var setupComplete = false
+    @AppStorage(DebugMode.storageKey) private var debugMode = false
     @State private var showBootLog = false
 
     var body: some View {
         VStack(spacing: 0) {
-            DiagnosticBanner(showBootLog: $showBootLog)
+            if debugMode {
+                DiagnosticBanner(showBootLog: $showBootLog)
+            }
             if setupComplete {
                 MainView()
             } else {
@@ -17,7 +20,12 @@ struct RootView: View {
     }
 }
 
-/// Diagnostic banner. Tap to view boot log + QEMU stderr inline.
+enum DebugMode {
+    static let storageKey = "debugMode"
+}
+
+/// v0.6.0: diagnostic banner gated on the "Debug mode" toggle in Settings.
+/// Tap opens the combined boot log + qemu stderr viewer.
 private struct DiagnosticBanner: View {
     @Binding var showBootLog: Bool
     var body: some View {
@@ -26,7 +34,7 @@ private struct DiagnosticBanner: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "stethoscope")
-                Text("Diagnostics. Tap for boot log + QEMU stderr.")
+                Text("Debug. Tap for boot log + QEMU stderr.")
                     .font(.caption2)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()

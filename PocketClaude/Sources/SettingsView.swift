@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(GuestRAM.storageKey) private var guestRAM_MB: Int = GuestRAM.defaultMB
+    @AppStorage(DebugMode.storageKey) private var debugMode: Bool = false
     @State private var draftValue: Double = Double(GuestRAM.defaultMB)
 
     var body: some View {
@@ -26,7 +27,7 @@ struct SettingsView: View {
                         step: Double(GuestRAM.stepMB)
                     )
                 } footer: {
-                    Text("How much RAM QEMU allocates for the Alpine guest. Lower = less likely to be killed by iOS memory pressure. Higher = more headroom for Claude Code. Change only takes effect on the next VM start.")
+                    Text("How much RAM QEMU allocates for the guest. Lower = less likely to be killed by iOS memory pressure. Higher = more headroom for Claude Code. Takes effect on the next VM start.")
                 }
 
                 Section {
@@ -36,7 +37,13 @@ struct SettingsView: View {
                         Text("Reset to default (\(GuestRAM.defaultMB) MB)")
                     }
                 } footer: {
-                    Text("If the app is running under LiveContainer, the effective process memory quota may be as low as ~500 MB. If v0.3.x sessions get killed mid-boot, try 384-512 MB here or sideload via SideStore/AltStore as a main app.")
+                    Text("Under LiveContainer the effective process memory quota can be as low as ~500 MB. If the VM gets killed mid-boot, try 384-512 MB here or sideload via SideStore/AltStore as a main app.")
+                }
+
+                Section {
+                    Toggle("Debug mode", isOn: $debugMode)
+                } footer: {
+                    Text("Show a diagnostic banner on the main screen and capture verbose boot logs. Restart the VM after toggling.")
                 }
             }
             .navigationTitle("Settings")

@@ -1,6 +1,8 @@
-# Pocket Claude
+# PocketDev
 
-**Claude Code in your pocket** — a sideloaded iOS app that runs Claude Code locally inside a minimal Alpine Linux VM via embedded QEMU (aarch64 emulation, serial console only). You open the app, see a terminal, and are inside a Claude Code session; QEMU, Alpine, disk images and 9p mounts are invisible plumbing.
+**AI coding CLIs in your pocket** — a sideloaded iOS app that runs Claude Code (and, in future, other AI coding CLIs like codex) locally inside a minimal Linux VM via embedded QEMU (aarch64 emulation, serial console only). You open the app, see a terminal, and are inside a Claude Code session; QEMU, the guest OS, disk images and 9p mounts are invisible plumbing.
+
+Historically named **Pocket Claude** — the repo and CI infrastructure still use that name. The v0.6.0 rename to PocketDev reflects the plan to add other AI coding CLIs beyond Claude Code.
 
 Distribution is unsigned-IPA-only by design (JIT requirements + GPL components make the App Store a non-goal). Sideload via LiveContainer, SideStore or AltStore.
 

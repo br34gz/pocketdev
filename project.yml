@@ -63,7 +63,7 @@ targets:
     info:
       path: PocketClaude/Resources/Info.plist
       properties:
-        CFBundleDisplayName: Pocket Claude
+        CFBundleDisplayName: PocketDev
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen:

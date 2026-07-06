@@ -25,7 +25,7 @@ final class StubVMEngine: VMEngine {
         generation += 1
         let gen = generation
         let bootLines = [
-            "Pocket Claude — VM engine stub",
+            "PocketDev — VM engine stub",
             "",
             "[stub] qemu-system-aarch64 ........ framework not present in bundle",
             "[stub] alpine-claude.qcow2 ........ not embedded",

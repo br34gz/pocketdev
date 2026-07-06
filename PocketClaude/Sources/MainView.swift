@@ -2,16 +2,13 @@ import SwiftUI
 import SafariServices
 
 struct MainView: View {
-    /// v0.2.3: switched from @EnvironmentObject to @ObservedObject on the
-    /// shared singleton. `@EnvironmentObject` `fatalError`s if the object
-    /// isn't found in the environment during a view transition; that was
-    /// the suspected cause of the v0.2.2 crash-on-Finish.
     @ObservedObject var env = PocketClaudeEnvironment.shared
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var showAuthSheet = false
     @State private var authSheetURL: URL?
     @State private var codeToPaste: String = ""
     @State private var showSettings = false
+    @State private var showJITSheet = false
 
     var body: some View {
         logBoot("mainview_body")
@@ -23,7 +20,7 @@ struct MainView: View {
                 }
             }
             .background(.black)
-            .navigationTitle(WorkspaceStore.displayName ?? "Pocket Claude")
+            .navigationTitle(WorkspaceStore.displayName ?? "PocketDev")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .onAppear {
@@ -40,6 +37,7 @@ struct MainView: View {
             }
             .sheet(isPresented: $showAuthSheet) { authSheet }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showJITSheet) { JITStatusSheet(active: env.selectedVariant == "jit") }
         }
     }
 
@@ -78,15 +76,11 @@ struct MainView: View {
         case .error(let msg):
             errorCard(title: "VM error", message: msg)
         case .stopped:
-            // If the session started emitting to the console and then
-            // stopped without an explicit error, we most likely got
-            // jetsam-killed by iOS's memory manager. Give the user the
-            // specific hint per spec plus a Retry.
             if env.sessionSawSerial {
                 let msg: String = {
-                    let base = "The Alpine kernel started printing, then the session ended. Most likely iOS killed the process for memory pressure. Try lowering guest RAM in Settings (currently \(GuestRAM.current()) MB)."
+                    let base = "The kernel started printing, then the session ended. Most likely iOS killed the process for memory pressure. Try lowering guest RAM in Settings (currently \(GuestRAM.current()) MB)."
                     if env.selectedVariant == "se" {
-                        return base + "\n\nYou're in interpreter mode (SE fallback). If you want JIT: install directly via SideStore/AltStore instead of LiveContainer, then re-launch under StikDebug. LiveContainer's PluginKit runtime interferes with StikDebug's register injection so JIT can't land."
+                        return base + "\n\nYou're in interpreter mode. If you want JIT: install via SideStore/AltStore instead of LiveContainer, then launch under StikDebug. LiveContainer's PluginKit runtime interferes with StikDebug's register injection."
                     }
                     return base
                 }()
@@ -130,7 +124,7 @@ struct MainView: View {
                 .buttonStyle(.bordered)
                 .tint(.white)
             }
-            Text("Note: QEMU holds process-global state, so Retry only works cleanly once. If it fails again, close and reopen the app (via the launcher that gave it JIT, if applicable).")
+            Text("Note: QEMU holds process-global state. If Retry fails, close and reopen the app.")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -144,14 +138,24 @@ struct MainView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Circle()
                     .fill(stateColor)
                     .frame(width: 10, height: 10)
                 Text(env.vmState.label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                variantPill
+                // v0.6.0: subtle single dot instead of the JIT/SE pill.
+                // Tap opens a small info sheet.
+                Button {
+                    showJITSheet = true
+                } label: {
+                    Circle()
+                        .fill(jitDotColor)
+                        .frame(width: 8, height: 8)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("JIT status")
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
@@ -198,7 +202,7 @@ struct MainView: View {
                 SafariView(url: url)
                     .frame(maxHeight: .infinity)
                 VStack(spacing: 8) {
-                    Text("Paste the code shown in the browser, then send it back to the VM:")
+                    Text("Paste the code from the browser and send it to the VM:")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     HStack {
@@ -210,7 +214,7 @@ struct MainView: View {
                             let trimmed = codeToPaste.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !trimmed.isEmpty else { return }
                             var bytes = Array(trimmed.utf8)
-                            bytes.append(0x0d) // CR
+                            bytes.append(0x0d)
                             env.engine?.send(bytes: bytes)
                             codeToPaste = ""
                             showAuthSheet = false
@@ -234,32 +238,18 @@ struct MainView: View {
         }
     }
 
+    private var jitDotColor: Color {
+        env.selectedVariant == "jit" ? .green : Color.white.opacity(0.35)
+    }
+
     private var bootingCopy: String {
         switch env.selectedVariant {
         case "jit":
-            return "JIT active -- boot to Alpine login expected in ~15-30 seconds."
+            return "JIT active - boot expected in ~15-30 seconds."
         case "se":
-            return "Interpreter mode (no runtime exec grant). Boot to Alpine login can take 5-20 minutes. Be patient; the terminal will start streaming kernel messages as they arrive."
+            return "Interpreter mode - boot to login takes ~30-60 seconds on modern devices. The terminal will start streaming kernel messages shortly."
         default:
-            return "Booting Alpine..."
-        }
-    }
-
-    /// Small pill next to the VM state indicator in the toolbar showing
-    /// which QEMU variant the engine picked. `nil` before start.
-    private var variantPill: some View {
-        Group {
-            if let v = env.selectedVariant {
-                Text(v.uppercased())
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(v == "jit" ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
-                    .foregroundStyle(.black)
-                    .clipShape(Capsule())
-            } else {
-                EmptyView()
-            }
+            return "Booting..."
         }
     }
 
@@ -270,6 +260,44 @@ struct MainView: View {
         if let filesURL = components?.url {
             UIApplication.shared.open(filesURL)
         }
+    }
+}
+
+/// Small explanation sheet the JIT dot opens.
+private struct JITStatusSheet: View {
+    let active: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(active ? Color.green : Color.gray.opacity(0.4))
+                        .frame(width: 14, height: 14)
+                    Text(active ? "JIT active" : "Interpreter mode")
+                        .font(.headline)
+                }
+                Text(active
+                    ? "The VM is running with JIT-compiled guest code. Boot is fast (~15-30 seconds) and Claude Code should feel responsive."
+                    : "The VM runs in interpreter mode. Boot takes 30-60 seconds. Full JIT support (up to 10x faster) is on the roadmap - it depends on sideload infrastructure evolving so a JIT permission can actually land in a plugin-hosted iOS process."
+                )
+                .font(.callout)
+                Text(active
+                    ? "Under the hood: QEMU's TCG emits native ARM64 instructions instead of walking each guest instruction one-by-one."
+                    : "Under the hood: interpreter is fine for Claude Code sessions. The 30-60 second boot is a one-time cost per launch.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button("OK") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(24)
+            .navigationTitle("JIT status")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .presentationDetents([.medium])
     }
 }
 
