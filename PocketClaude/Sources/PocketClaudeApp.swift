@@ -43,6 +43,7 @@ struct PocketClaudeApp: App {
         // string. See release-notes body for each build's framework list.
         logBoot("framework_layer_glib")
         logBoot("framework_layer_pixman_crypto")
+        logBoot("framework_layer_io_display")
         logBoot("app_init")
     }
 
