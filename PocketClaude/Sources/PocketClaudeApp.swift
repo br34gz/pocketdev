@@ -42,6 +42,7 @@ struct PocketClaudeApp: App {
         // build the user is running without having to check the version
         // string. See release-notes body for each build's framework list.
         logBoot("framework_layer_glib")
+        logBoot("framework_layer_pixman_crypto")
         logBoot("app_init")
     }
 

@@ -46,16 +46,16 @@ jobs:
           xcodegen generate
           ls -la PocketClaude.xcodeproj/
 
-      # v0.2.4 — framework bisection layer "glib".
-      # Embed only the glib-family leaf set that has no external @rpath
-      # dependencies beyond itself (verified by otool -L against UTM-SE
-      # 5.0.3). None of these are dlopen'd by our code — the VM engine
-      # is still routed to the stub. The test is whether iOS amfid /
-      # the sideloader can validate & install these seven frameworks
-      # without triggering the launch crash seen with the full 22-set
-      # in v0.2.0/v0.2.1.
+      # v0.2.5 — framework bisection layer "pixman_crypto"
+      # (cumulative on top of v0.2.4's glib layer, which launched cleanly).
       #
-      # Frameworks (closed dependency set):
+      # None of these are dlopen'd by our code — the VM engine is still
+      # routed to the stub. The test is whether iOS amfid / the
+      # sideloader accept the combined 12-framework set at install and
+      # launch, on the way to identifying which of the 22 frameworks
+      # from v0.2.0/v0.2.1 caused the SIGHUP.
+      #
+      # v0.2.4 glib set (verified clean, from otool -L):
       #   glib-2.0.0   -> iconv.2, intl.8
       #   gio-2.0.0    -> glib, gobject, gmodule, intl
       #   gobject-2.0.0 -> glib, ffi.8
@@ -63,6 +63,13 @@ jobs:
       #   iconv.2      -> (self)
       #   intl.8       -> iconv.2
       #   ffi.8        -> (self)
+      #
+      # v0.2.5 additions (verified: none link outside the combined set):
+      #   pixman-1.0   -> (self)
+      #   jpeg.62      -> (self)
+      #   epoxy.0      -> (self)
+      #   crypto.1.1   -> (self)   [openssl 1.1 crypto lib]
+      #   ssl.1.1      -> crypto.1.1
 
       - name: Fetch UTM-SE (source of the iOS QEMU frameworks)
         env:
@@ -74,13 +81,14 @@ jobs:
           cd build/utm
           unzip -q UTM-SE.ipa
 
-      - name: Extract glib-layer frameworks only
+      - name: Extract layer frameworks (glib + pixman_crypto)
         run: |
           mkdir -p build/staged-frameworks
           SRC="build/utm/Payload/UTM SE.app/Frameworks"
           for fw in \
               glib-2.0.0 gio-2.0.0 gobject-2.0.0 gmodule-2.0.0 \
-              iconv.2 intl.8 ffi.8; do
+              iconv.2 intl.8 ffi.8 \
+              pixman-1.0 jpeg.62 epoxy.0 crypto.1.1 ssl.1.1; do
             if [[ -d "$SRC/$fw.framework" ]]; then
               cp -R "$SRC/$fw.framework" build/staged-frameworks/
             else
@@ -156,31 +164,35 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            FRAMEWORK BISECTION — layer "glib" (7 frameworks embedded).
+            FRAMEWORK BISECTION — layer "pixman_crypto"
+            (cumulative — 12 frameworks embedded, all from
+            utmapp/UTM v5.0.3 UTM-SE.ipa, ad-hoc re-signed).
 
-            Embedded (from utmapp/UTM v5.0.3 UTM-SE.ipa, ad-hoc re-signed):
-              glib-2.0.0
-              gio-2.0.0
-              gobject-2.0.0
-              gmodule-2.0.0
-              iconv.2
-              intl.8
-              ffi.8
+            v0.2.4 set (confirmed clean on device):
+              glib-2.0.0, gio-2.0.0, gobject-2.0.0, gmodule-2.0.0,
+              iconv.2, intl.8, ffi.8
+
+            v0.2.5 additions (delta):
+              pixman-1.0   (2D pixel manipulation)
+              jpeg.62      (libjpeg)
+              epoxy.0      (OpenGL function loader)
+              crypto.1.1   (openssl 1.1 crypto)
+              ssl.1.1      (openssl 1.1 TLS)
 
             None are dlopen'd or LC_LOAD_DYLIB'd by our code — the VM
-            engine is still routed to the stub. The test is purely
-            whether iOS amfid / the sideloader accept these seven at
-            install/launch without repeating the crash from v0.2.0.
+            engine is still routed to the stub. Test: whether the
+            sideloader / amfid accept these 12 at install and launch.
 
             IMPORTANT — DELETE THE PREVIOUS INSTALL FIRST:
             Long-press icon → Remove App → Delete App before installing.
             iOS caches signatures per bundle-ID; a plain reinstall can
             inherit stale amfid state.
 
-            Expected outcome: identical UI to v0.2.3 — launches to the
+            Expected outcome: identical UI to v0.2.4 — launches to the
             wizard, workspace picker works, stepping through to Finish
             transitions to MainView with the stub terminal. Boot log
-            should show `framework_layer_glib` right after `dylib_ctor`.
+            should show `framework_layer_glib` and
+            `framework_layer_pixman_crypto` right after `dylib_ctor`.
 
             If it crashes: last line in the boot log tells us which
             phase died. Copy it via the yellow banner → sheet → Copy.
