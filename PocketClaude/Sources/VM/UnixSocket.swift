@@ -30,7 +30,7 @@ final class UnixSocket {
             addr.sun_family = sa_family_t(AF_UNIX)
             let pathBytes = Array(path.utf8)
             guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else {
-                close(fd); fd = -1; return false
+                Darwin.close(fd); fd = -1; return false
             }
             withUnsafeMutableBytes(of: &addr.sun_path) { raw in
                 let dst = raw.bindMemory(to: CChar.self).baseAddress!
