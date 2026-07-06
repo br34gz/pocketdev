@@ -64,21 +64,44 @@ echo "$CLAUDE_VERSION" > /etc/pocket-claude-version
 useradd -m -s /bin/bash claude
 passwd -d claude || true
 
-# Autologin on ttyAMA0 via systemd override + manual symlink.
-# systemctl enable when systemd isn't running (which is our case
-# inside the build container) doesn't reliably create the .wants
-# symlink for template units. Do it explicitly.
-mkdir -p /etc/systemd/system/serial-getty@ttyAMA0.service.d
-cat > /etc/systemd/system/serial-getty@ttyAMA0.service.d/override.conf <<'EOF'
+# Autologin on ttyAMA0. v0.6.0's serial-getty@ttyAMA0.service override
+# never landed the --autologin arg (systemctl enable inside a
+# build-time chroot without a running systemd is unreliable for
+# template units, and even manual symlinks didn't cause the drop-in
+# to apply). Skip the getty templating layer entirely: mask
+# serial-getty@ttyAMA0 so it can't fight for the tty, then run our
+# own pocket-console.service that invokes /bin/login -f claude
+# on ttyAMA0 directly. login(1) -f skips password auth and still
+# sources /etc/profile + ~/.profile so all our env setup works.
+ln -sf /dev/null /etc/systemd/system/serial-getty@ttyAMA0.service
+
+cat > /etc/systemd/system/pocket-console.service <<'EOF'
+[Unit]
+Description=PocketDev console (autologin as claude on ttyAMA0)
+After=systemd-user-sessions.service pocket-control.service
+Conflicts=serial-getty@ttyAMA0.service
+Before=getty.target
+RefuseManualStop=no
+
 [Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin claude --noclear --keep-baud 115200,38400,9600 ttyAMA0 $TERM
 Type=idle
+Environment=TERM=vt100
+TTYPath=/dev/ttyAMA0
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+ExecStart=/bin/login -f claude
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
 EOF
-mkdir -p /etc/systemd/system/getty.target.wants
-ln -sf /lib/systemd/system/serial-getty@.service \
-    /etc/systemd/system/getty.target.wants/serial-getty@ttyAMA0.service
-systemctl enable serial-getty@ttyAMA0.service 2>/dev/null || true
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/pocket-console.service \
+    /etc/systemd/system/multi-user.target.wants/pocket-console.service
 
 # systemd-networkd for DHCP on virtio-net-device.
 mkdir -p /etc/systemd/network

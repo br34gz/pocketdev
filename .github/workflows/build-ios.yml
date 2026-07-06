@@ -270,7 +270,25 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.6.0 - guest image v4, Debian glibc rebuild.
+            v0.6.1 - Debian glibc guest with a working autologin.
+
+            v0.6.0 shipped UI/rename/icon polish but the Debian guest
+            wasn't publishable - serial-getty override's --autologin
+            arg never landed and the interactive smoke test timed out.
+            v0.6.1 skips the getty template layer entirely: masks
+            serial-getty@ttyAMA0 so it can't fight for the tty, and
+            runs a custom pocket-console.service that invokes
+            /bin/login -f claude on ttyAMA0 directly. login(1) -f
+            skips password auth and still sources ~/.profile, so all
+            our env probes + interactive claude launch happen the
+            same way they did in v0.5.x.
+
+            Guest CI smoke test unchanged: still watches interactive
+            claude for 60s after the version probe, still fails the
+            guest release if the null-bytes/TypeError/Module-not-found
+            marker fires.
+
+            iOS build is unchanged from v0.6.0-build.29.
 
             Both v0.5.0 (apk claude 2.1.108, Bun-compiled) and v0.5.1
             (npm claude 2.1.201, Node-compiled) crashed interactively
