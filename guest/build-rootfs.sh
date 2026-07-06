@@ -22,36 +22,46 @@ mkdir -p "$ROOT/etc/apk"
 cp -r /etc/apk/keys "$ROOT/etc/apk/keys"
 printf '%s/main\n%s/community\n' "$MIRROR" "$MIRROR" > "$ROOT/etc/apk/repositories"
 
-# Base system + Node.js/npm (needed to install claude-code) + native
-# ripgrep (spec section 4.3).
+# Install nodejs + npm in BOTH the outer arm64 container and the rootfs.
+# We install claude-code globally from the outer container's npm with
+# --prefix pointing at $ROOT/usr (avoids the chroot-npm-needs-/proc
+# problem that killed our first two attempts). At runtime the guest
+# runs the rootfs's copy of node.
+apk add --no-cache nodejs npm
+
+# Base system + Node.js/npm + native ripgrep (spec section 4.3).
 apk --root "$ROOT" --initdb --no-cache add \
     alpine-base linux-virt bash git curl openssh-client ca-certificates \
     libgcc libstdc++ ripgrep zram-init agetty \
     nodejs npm
 
 # --- Install claude-code from the npm registry ---------------------------
-# Runs inside the rootfs chroot so npm's prefix is /usr and the resulting
-# 'claude' shim lands in /usr/bin/claude via /usr/lib/node_modules linkage.
-# Needs working DNS inside the chroot; the outer container's resolv.conf
-# is what actually works, so borrow it. Overwritten below with the
-# runtime SLIRP defaults.
-cp /etc/resolv.conf "$ROOT/etc/resolv.conf"
+# Runs from the OUTER container with --prefix pointing into the rootfs.
+# --unsafe-perm lets npm run install scripts as root (default refuses).
+# DNS matters here for registry.npmjs.org resolution; outer container
+# already has working DNS via Docker.
+NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false \
+    npm install --prefix "$ROOT/usr" -g --unsafe-perm @anthropic-ai/claude-code
 
-chroot "$ROOT" sh -c "
-    npm config set fund false
-    npm config set audit false
-    npm install -g --unsafe-perm @anthropic-ai/claude-code
-"
+# Fixup any host-container symlinks that npm may have baked in - the
+# `claude` bin should point to the module in $ROOT/usr/lib, which it
+# does by virtue of --prefix. Verify.
+ls -la "$ROOT/usr/bin/claude" || {
+    echo "::error::claude shim missing from $ROOT/usr/bin"
+    ls "$ROOT/usr/bin" | head
+    exit 1
+}
 
-# In-chroot smoke test. This runs under qemu-user binfmt on the CI
-# runner and is only a proxy for on-device behaviour - the definitive
-# check is the full system-mode qemu boot smoke test the guest workflow
-# runs against the packed qcow2 (see build-guest.yml).
+# In-container smoke check. We use the rootfs's node (arm64) rather than
+# the outer container's (also arm64 under qemu-user binfmt but a
+# different install). Setting PATH ensures /usr/bin/env node in claude's
+# shebang resolves to the rootfs binary.
 test_home=/tmp/smoketest-home
 rm -rf "$ROOT$test_home"
 mkdir -p "$ROOT$test_home/.config/anthropic"
-chroot "$ROOT" env HOME="$test_home" /usr/bin/claude --version
-CLAUDE_VERSION="$(chroot "$ROOT" /usr/bin/claude --version 2>/dev/null | head -1 || echo '(unknown)')"
+PATH="$ROOT/usr/bin:$PATH" HOME="$ROOT$test_home" \
+    "$ROOT/usr/bin/claude" --version
+CLAUDE_VERSION="$(PATH="$ROOT/usr/bin:$PATH" "$ROOT/usr/bin/claude" --version 2>/dev/null | head -1 || echo '(unknown)')"
 CLAUDE_VARIANT="npm:@anthropic-ai/claude-code@${CLAUDE_VERSION}"
 
 echo "$CLAUDE_VARIANT" > "$ROOT/etc/pocket-claude-variant"
