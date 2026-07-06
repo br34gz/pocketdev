@@ -1,0 +1,73 @@
+name: Build guest image
+
+# Builds the Alpine aarch64 guest disk image (spec section 4) and publishes
+# it under the rolling "guest-latest" release. The iOS build fetches these
+# assets and embeds them in the app bundle.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "guest/**"
+      - ".github/workflows/build-guest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build alpine-claude.qcow2
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU binfmt (arm64 containers)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build Alpine aarch64 rootfs
+        run: |
+          mkdir -p out
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD/guest:/guest:ro" \
+            -v "$PWD/out:/out" \
+            alpine:3.21 sh /guest/build-rootfs.sh
+
+      - name: Create qcow2 disk image
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-utils zstd e2fsprogs
+          sudo mkdir -p rootfs
+          sudo tar -xpf out/rootfs.tar -C rootfs
+          # 2 GB virtual disk (spec section 3: headroom for claude
+          # auto-updates + caches); qcow2 stays thin.
+          truncate -s 2G disk.ext4
+          sudo mkfs.ext4 -q -L alpine -d rootfs disk.ext4
+          qemu-img convert -f raw -O qcow2 disk.ext4 alpine-claude.qcow2
+          zstd -19 -T0 alpine-claude.qcow2 -o alpine-claude.qcow2.zst
+          ls -lh alpine-claude.qcow2 alpine-claude.qcow2.zst out/
+
+      - name: Publish guest-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: guest-latest
+          name: "Guest image (rolling)"
+          body: |
+            Alpine aarch64 guest image for Pocket Claude, built from guest/.
+
+            Commit: ${{ github.sha }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Assets:
+            - alpine-claude.qcow2.zst — root disk (zstd), decompress before use
+            - vmlinuz-virt / initramfs-virt — direct kernel boot files
+          files: |
+            alpine-claude.qcow2.zst
+            out/vmlinuz-virt
+            out/initramfs-virt
+          prerelease: true
+          make_latest: false
+          draft: false

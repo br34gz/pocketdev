@@ -1,0 +1,125 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "guest/**"
+      - ".github/workflows/build-guest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write    # needed to create the GitHub Release
+
+jobs:
+  build:
+    name: Build PocketClaude.ipa
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract MARKETING_VERSION
+        id: version
+        run: |
+          VERSION=$(grep 'MARKETING_VERSION:' project.yml | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::could not parse MARKETING_VERSION from project.yml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "PocketClaude v$VERSION (build ${{ github.run_number }})"
+
+      - name: Select Xcode (latest 26.x)
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer" || true
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          ls -la PocketClaude.xcodeproj/
+
+      - name: Fetch guest image (if published)
+        id: guest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/guest
+          if gh release download guest-latest \
+               --repo "$GITHUB_REPOSITORY" \
+               --pattern 'alpine-claude.qcow2.zst' \
+               --pattern 'vmlinuz-virt' \
+               --pattern 'initramfs-virt' \
+               --dir build/guest; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            ls -lh build/guest
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No guest-latest release yet; building IPA without embedded guest image."
+          fi
+
+      - name: Build archive (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PocketClaude.xcodeproj \
+            -scheme PocketClaude \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/PocketClaude.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            archive
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/PocketClaude.xcarchive/Products/Applications/PocketClaude.app build/Payload/
+          # Embed the guest image assets in the app bundle when available.
+          # Done post-archive: the IPA is unsigned, so bundle contents are
+          # re-sealed at sideload time anyway, and this keeps Xcode out of
+          # the 200 MB resource copy.
+          if [[ "${{ steps.guest.outputs.found }}" == "true" ]]; then
+            mkdir -p build/Payload/PocketClaude.app/GuestImage
+            cp build/guest/* build/Payload/PocketClaude.app/GuestImage/
+          fi
+          cd build
+          /usr/bin/zip -qry PocketClaude-unsigned.ipa Payload/
+          ls -lh PocketClaude-unsigned.ipa
+
+      - name: Upload artifact (zip; raw .ipa is also published as a release asset below)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketClaude-unsigned-ipa
+          path: build/PocketClaude-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish as latest release (direct .ipa download)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
+          name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
+          body: |
+            Auto-built unsigned IPA for sideloading (LiveContainer / SideStore / AltStore).
+
+            Guest image embedded: ${{ steps.guest.outputs.found }}
+
+            Commit: ${{ github.sha }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Permanent latest-build URL:
+            https://github.com/${{ github.repository }}/releases/latest/download/PocketClaude-unsigned.ipa
+          files: build/PocketClaude-unsigned.ipa
+          make_latest: true
+          draft: false
+          prerelease: false

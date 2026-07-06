@@ -1,0 +1,10 @@
+.DS_Store
+build/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+out/
+rootfs/
+*.qcow2
+*.qcow2.zst
