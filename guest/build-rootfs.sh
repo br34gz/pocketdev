@@ -83,7 +83,15 @@ Name=en*
 [Network]
 DHCP=ipv4
 EOF
-systemctl enable systemd-networkd systemd-resolved
+systemctl enable systemd-networkd
+# systemd-resolved not shipped by default in this Debian package set;
+# rely on the SLIRP-provided /etc/resolv.conf (systemd-networkd may
+# write a NetworkManager-style one but we set nameserver 10.0.2.3
+# explicitly).
+mkdir -p /etc
+cat > /etc/resolv.conf <<'EOF'
+nameserver 10.0.2.3
+EOF
 
 # 9p workspace mount
 mkdir -p /workspace
