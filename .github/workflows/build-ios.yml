@@ -270,7 +270,29 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.5.1 - guest image v3, npm claude-code + system-mode CI smoke test.
+            v0.6.0 - guest image v4, Debian glibc rebuild.
+
+            Both v0.5.0 (apk claude 2.1.108, Bun-compiled) and v0.5.1
+            (npm claude 2.1.201, Node-compiled) crashed interactively
+            with a nul-bytes TypeError inside the AWS SDK credential-
+            provider chain. Swapping the runtime made zero difference,
+            proving the bug isn't Bun-specific. Common denominator:
+            Alpine musl.
+
+            v0.6.0 swaps the guest base OS to Debian 12 (bookworm).
+            Same shape - systemd getty autologin on ttyAMA0, npm-installed
+            claude-code, 9p /workspace mount, virtio-serial control
+            channel. Just glibc instead of musl.
+
+            Guest CI smoke test extended: after seeing "claude --version:
+            X.Y.Z" it now watches interactive claude for 60s to catch
+            the null-bytes crash (the .profile runs interactive claude
+            right after the version probe). If the crash reproduces on
+            Debian too, the guest workflow FAILS and doesn't publish.
+
+            IPA size expected to bump ~30-60 MB vs v0.5.1 - Debian is
+            heavier than Alpine (glibc + systemd) but that's the price
+            of a working runtime.
 
             v0.5.0 shipped claude-code 2.1.108 from the apk repo. That
             version's Bun bunfs failed differently on device (Module

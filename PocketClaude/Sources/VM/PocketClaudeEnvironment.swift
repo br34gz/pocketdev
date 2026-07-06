@@ -34,8 +34,11 @@ final class PocketClaudeEnvironment: ObservableObject {
     @Published var selectedVariant: String?
     /// Which claude-install strategy the guest image landed on, as
     /// broadcast over the control channel at boot. Values like
-    /// "apk:claude-code=2.1.108-r1", "npm", "none".
+    /// "apk:claude-code=2.1.108-r1", "npm:@anthropic-ai/claude-code@X.Y.Z".
     @Published var guestClaudeVariant: String?
+    /// Which base OS the guest image is (v0.6.0+): "debian-12" etc.
+    /// Older images don't emit this and it stays nil.
+    @Published var guestOS: String?
 
     /// URL the guest just published; wizard step 3 offers Safari handoff.
     var latestAuthURL: URL? { pendingAuthURL }

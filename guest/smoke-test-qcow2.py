@@ -24,10 +24,16 @@ import subprocess
 import sys
 import time
 
-TIMEOUT_S = 480  # 8 minutes hard ceiling
+TIMEOUT_S = 600  # 10 minutes hard ceiling
 CONSOLE_SOCK = "/tmp/smoke-console.sock"
 CONTROL_SOCK = "/tmp/smoke-control.sock"
 SUCCESS_RE = re.compile(rb"claude --version:\s*([0-9]+\.[0-9]+\.[0-9]+)")
+# The .profile prints "claude --version" FIRST, then runs interactive
+# `claude`. v0.5.1 got a clean version line but interactive claude
+# still hit the null-bytes crash. Watch for the crash for INTERACTIVE_WATCH_S
+# after seeing the version line and only declare PASS at the end of that
+# window if nothing bad printed.
+INTERACTIVE_WATCH_S = 60
 FAIL_MARKERS = [
     b"Module not found",
     b"null bytes",
@@ -35,6 +41,7 @@ FAIL_MARKERS = [
     b"Kernel panic",
     b"Segmentation fault",
     b"claude --version FAILED",
+    b"claude exited unexpectedly",
 ]
 
 
@@ -102,7 +109,9 @@ def main() -> int:
         deadline = time.time() + TIMEOUT_S
         boot_ok = False
         claude_variant = None
+        guest_os = None
         detected_version = None
+        version_seen_at = None  # timestamp when we first saw --version
 
         while time.time() < deadline:
             for name, sock, buf_name in (
@@ -134,18 +143,34 @@ def main() -> int:
                             boot_ok = True
                         elif text.startswith("CLAUDE_VARIANT "):
                             claude_variant = text[len("CLAUDE_VARIANT "):]
+                        elif text.startswith("GUEST_OS "):
+                            guest_os = text[len("GUEST_OS "):]
 
             for marker in FAIL_MARKERS:
                 if marker in console_buffer:
                     print(f"\nSMOKE FAIL: caught fail marker: {marker.decode()}")
+                    print(f"  boot_ok={boot_ok}, claude_variant={claude_variant}, "
+                          f"guest_os={guest_os}, detected_version={detected_version}")
                     return 1
 
-            m = SUCCESS_RE.search(console_buffer)
-            if m:
-                detected_version = m.group(1).decode()
+            if version_seen_at is None:
+                m = SUCCESS_RE.search(console_buffer)
+                if m:
+                    detected_version = m.group(1).decode()
+                    version_seen_at = time.time()
+                    print(
+                        f"\n[smoke] --version -> {detected_version}. "
+                        f"Watching interactive claude for {INTERACTIVE_WATCH_S}s..."
+                    )
+            elif time.time() - version_seen_at > INTERACTIVE_WATCH_S:
+                # Held the interactive window open long enough with no fail
+                # markers - declare PASS.
                 print(
                     f"\nSMOKE PASS: claude --version -> {detected_version} "
-                    f"(claude_variant={claude_variant}, boot_ok={boot_ok})"
+                    f"and interactive claude survived {INTERACTIVE_WATCH_S}s "
+                    f"without a crash marker "
+                    f"(claude_variant={claude_variant}, guest_os={guest_os}, "
+                    f"boot_ok={boot_ok})"
                 )
                 return 0
 

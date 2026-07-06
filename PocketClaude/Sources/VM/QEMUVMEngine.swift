@@ -319,17 +319,22 @@ final class QEMUVMEngine: VMEngine {
             return
         }
         if line.hasPrefix("CLAUDE_VARIANT ") {
-            // Guest reports which claude-install strategy the image v2
-            // build-time smoke test landed on. Values roughly match the
-            // build script's STRATEGIES entries, e.g.
-            //   apk:claude-code=2.1.108-r1
-            //   apk:claude-code
-            //   npm
-            //   none            (nothing survived; shell-only image)
+            // Guest reports which claude-install strategy landed.
+            // v0.5.x: apk:claude-code=X or npm:@anthropic-ai/...
+            // v0.6.x: npm:@anthropic-ai/...
             let raw = String(line.dropFirst("CLAUDE_VARIANT ".count))
             logPhase("claude_variant=\(raw)")
             DispatchQueue.main.async {
                 PocketClaudeEnvironment.shared.guestClaudeVariant = raw
+            }
+            return
+        }
+        if line.hasPrefix("GUEST_OS ") {
+            // v0.6.0+: guest broadcasts its OS name (debian-12, etc).
+            let raw = String(line.dropFirst("GUEST_OS ".count))
+            logPhase("guest_os=\(raw)")
+            DispatchQueue.main.async {
+                PocketClaudeEnvironment.shared.guestOS = raw
             }
         }
     }

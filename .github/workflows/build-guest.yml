@@ -28,15 +28,15 @@ jobs:
       - name: Set up QEMU binfmt (arm64 containers)
         uses: docker/setup-qemu-action@v3
 
-      - name: Build Alpine aarch64 rootfs
+      - name: Build Debian aarch64 rootfs
         run: |
           mkdir -p out
           docker run --rm --platform linux/arm64 \
             -v "$PWD/guest:/guest:ro" \
             -v "$PWD/out:/out" \
-            alpine:3.21 sh /guest/build-rootfs.sh
-          # Container writes as root; initramfs is 0600. Make outputs
-          # readable for the release upload step.
+            debian:12-slim bash /guest/build-rootfs.sh
+          # Container writes as root; make outputs readable for the
+          # release upload step.
           sudo chmod -R a+r out
 
       - name: Create qcow2 disk image
@@ -53,11 +53,12 @@ jobs:
           zstd -19 -T0 alpine-claude.qcow2 -o alpine-claude.qcow2.zst
           ls -lh alpine-claude.qcow2 alpine-claude.qcow2.zst out/
 
-      - name: Read claude variant metadata
+      - name: Read guest metadata
         id: variant
         run: |
           echo "variant=$(cat out/claude-variant.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
           echo "version=$(cat out/claude-version.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+          echo "guest_os=$(cat out/guest-os.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
 
       - name: System-mode QEMU boot smoke test
         # Boots the packed qcow2 exactly the way the iOS app does
@@ -82,6 +83,7 @@ jobs:
           body: |
             Alpine aarch64 guest image for Pocket Claude, built from guest/.
 
+            guest_os:       ${{ steps.variant.outputs.guest_os }}
             claude_variant: ${{ steps.variant.outputs.variant }}
             claude_version: ${{ steps.variant.outputs.version }}
 
