@@ -95,11 +95,40 @@ enum GuestAssets {
         return FileManager.default.fileExists(atPath: candidate.path) ? candidate.path : nil
     }
 
+    /// Which QEMU variant we picked, and where it lives.
+    struct QemuVariant {
+        let name: String   // "jit" or "se"
+        let path: String
+    }
+
+    /// v0.4.1 ships two qemu variants side by side:
+    ///   qemu-aarch64-softmmu-jit.framework  (from UTM.ipa, 29 MB, JIT-only)
+    ///   qemu-aarch64-softmmu-se.framework   (from UTM-SE.ipa, 191 MB, interpreter)
+    /// Runtime picks JIT if the mmap-MAP_JIT probe succeeded, SE otherwise.
+    /// SE always works; JIT only works when the runtime exec grant is in
+    /// place (StikDebug + SideStore/AltStore, main app process context).
     static func qemuFrameworkPath() -> String? {
-        let frameworksURL = Bundle.main.bundleURL.appendingPathComponent("Frameworks")
-        let candidate = frameworksURL
-            .appendingPathComponent("qemu-aarch64-softmmu.framework")
-            .appendingPathComponent("qemu-aarch64-softmmu")
-        return FileManager.default.fileExists(atPath: candidate.path) ? candidate.path : nil
+        selectQemuVariant()?.path
+    }
+
+    static func selectQemuVariant() -> QemuVariant? {
+        let jitAvailable = pocket_probe_jit() == 1
+        let preferred = jitAvailable ? "jit" : "se"
+        if let variant = variantIfPresent(preferred) { return variant }
+        // Fall back to the other one if we somehow shipped an asymmetric
+        // build (should never happen but defensive).
+        return variantIfPresent(preferred == "jit" ? "se" : "jit")
+    }
+
+    private static func variantIfPresent(_ name: String) -> QemuVariant? {
+        let frameworkName = "qemu-aarch64-softmmu-\(name)"
+        let path = Bundle.main.bundleURL
+            .appendingPathComponent("Frameworks")
+            .appendingPathComponent("\(frameworkName).framework")
+            .appendingPathComponent(frameworkName)
+            .path
+        return FileManager.default.fileExists(atPath: path)
+            ? QemuVariant(name: name, path: path)
+            : nil
     }
 }

@@ -28,6 +28,10 @@ final class PocketClaudeEnvironment: ObservableObject {
     /// (probably argv / firmware / socket issue) from "died after boot
     /// progressed" (probably jetsam / iOS memory kill).
     @Published var sessionSawSerial: Bool = false
+    /// Which QEMU variant the engine picked at start: "jit" or "se"
+    /// (or nil if never started). Drives the "expected boot time" copy
+    /// on the status overlay.
+    @Published var selectedVariant: String?
 
     /// URL the guest just published; wizard step 3 offers Safari handoff.
     var latestAuthURL: URL? { pendingAuthURL }

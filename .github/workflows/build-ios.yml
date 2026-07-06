@@ -46,30 +46,35 @@ jobs:
           xcodegen generate
           ls -la PocketClaude.xcodeproj/
 
-      # v0.4.0 - switch from UTM-SE.ipa (TCTI interpreter, no JIT) to
-      # UTM.ipa (JIT-capable). The QEMU framework in UTM.ipa is compiled
-      # with mmap(MAP_JIT) + pthread_jit_write_protect_np() so it can
-      # emit native code when the process has the dynamic-codesigning
-      # entitlement + a runtime exec grant (StikDebug / SideJITServer).
-      #
-      # Dependency delta vs UTM-SE (22 -> 25 frameworks):
-      #   + Hypervisor.framework   (87 KB stub UTM ships)
-      #   + usb-1.0.0              (172 KB)
-      #   + usbredirparser.1       (56 KB)
-      # qemu-aarch64-softmmu itself shrinks 191 MB (SE interpreter) to
-      # 30 MB (JIT). Total framework payload drops 213 MB -> 51 MB.
+      # v0.4.1 - dual-engine build.
+      # v0.4.0 shipped only UTM.ipa's JIT qemu; user's StikDebug couldn't
+      # inject JIT under LiveContainer's PluginKit runtime so mmap MAP_JIT
+      # failed and the JIT-only binary exit()d. v0.4.1 bundles BOTH:
+      #   - qemu-aarch64-softmmu-jit  (from UTM.ipa,   29 MB, JIT-only)
+      #   - qemu-aarch64-softmmu-se   (from UTM-SE.ipa, 191 MB, TCTI interpreter)
+      # Runtime picks JIT if the mmap probe succeeds, SE otherwise. Both
+      # variants use the SAME support frameworks (UTM's 24-framework
+      # closure is a superset of UTM-SE's 21-framework one).
 
-      - name: Fetch UTM.ipa (JIT-capable QEMU frameworks)
+      - name: Fetch UTM.ipa (JIT-capable QEMU)
         env:
           UTM_URL: https://github.com/utmapp/UTM/releases/download/v5.0.3/UTM.ipa
         run: |
           mkdir -p build/utm
           curl -sSL "$UTM_URL" -o build/utm/UTM.ipa
-          ls -lh build/utm/UTM.ipa
-          cd build/utm
-          unzip -q UTM.ipa
+          cd build/utm && unzip -q UTM.ipa
+          ls -lh UTM.ipa
 
-      - name: Extract full framework set (25 total)
+      - name: Fetch UTM-SE.ipa (interpreter QEMU)
+        env:
+          UTM_SE_URL: https://github.com/utmapp/UTM/releases/download/v5.0.3/UTM-SE.ipa
+        run: |
+          mkdir -p build/utm-se
+          curl -sSL "$UTM_SE_URL" -o build/utm-se/UTM-SE.ipa
+          cd build/utm-se && unzip -q UTM-SE.ipa
+          ls -lh UTM-SE.ipa
+
+      - name: Extract support frameworks (24, from UTM.ipa)
         run: |
           mkdir -p build/staged-frameworks
           SRC="build/utm/Payload/UTM.app/Frameworks"
@@ -79,8 +84,7 @@ jobs:
               pixman-1.0 jpeg.62 epoxy.0 crypto.1.1 ssl.1.1 \
               slirp.0 zstd.1 spice-server.1 virglrenderer.1 vulkan.1 \
               gstreamer-1.0.0 gstbase-1.0.0 gstapp-1.0.0 opus.0 \
-              Hypervisor usb-1.0.0 usbredirparser.1 \
-              qemu-aarch64-softmmu; do
+              Hypervisor usb-1.0.0 usbredirparser.1; do
             if [[ -d "$SRC/$fw.framework" ]]; then
               cp -R "$SRC/$fw.framework" build/staged-frameworks/
             else
@@ -90,12 +94,46 @@ jobs:
           done
           find build/staged-frameworks -name _CodeSignature -type d \
               -exec rm -rf {} + 2>/dev/null || true
+
+      - name: Stage both QEMU variants with distinct install names
+        # Both UTM.ipa and UTM-SE.ipa ship a framework called exactly
+        # `qemu-aarch64-softmmu.framework`. To have them coexist we
+        # rename each: -jit and -se. That means renaming:
+        #   the framework directory
+        #   the binary inside (must match Info.plist CFBundleExecutable)
+        #   LC_ID_DYLIB via install_name_tool (so dyld records the new
+        #     @rpath at dlopen time)
+        # QEMUBootstrap dlopens by absolute path so no rpath change is
+        # needed for the app binary; each qemu variant remains a
+        # runtime-loadable stand-alone framework.
+        run: |
+          stage_variant() {
+            local src="$1"     # source .framework dir with the original name
+            local suffix="$2"  # "jit" or "se"
+            local new="qemu-aarch64-softmmu-${suffix}"
+            local dest="build/staged-frameworks/${new}.framework"
+            cp -R "$src" "$dest"
+            find "$dest" -name _CodeSignature -type d -exec rm -rf {} + 2>/dev/null || true
+            mv "$dest/qemu-aarch64-softmmu" "$dest/${new}"
+            # Rewrite the LC_ID_DYLIB so the framework's install_name
+            # matches its new path. Codesign will re-adhoc sign this
+            # below; install_name_tool invalidates any prior signature
+            # anyway, which is fine because we always re-sign.
+            install_name_tool -id "@rpath/${new}.framework/${new}" "$dest/${new}"
+            # Info.plist's CFBundleExecutable must match the binary name.
+            plutil -replace CFBundleExecutable -string "${new}" "$dest/Info.plist"
+            # Sanity check.
+            file "$dest/${new}" | head -1
+          }
+          stage_variant "build/utm/Payload/UTM.app/Frameworks/qemu-aarch64-softmmu.framework" jit
+          stage_variant "build/utm-se/Payload/UTM SE.app/Frameworks/qemu-aarch64-softmmu.framework" se
+          echo "=== dual-variant framework check ==="
+          ls build/staged-frameworks | grep qemu-aarch64
           du -sh build/staged-frameworks
-          ls build/staged-frameworks | wc -l
 
       - name: Extract qemu firmware
-        # UTM.ipa firmware sits at Payload/UTM.app/qemu/ - same structure
-        # and ROM set as UTM-SE.
+        # From UTM.ipa; same ROMs as UTM-SE.ipa but from a single source
+        # to avoid duplication.
         run: |
           mkdir -p build/staged-firmware
           SRC="build/utm/Payload/UTM.app/qemu"
@@ -109,7 +147,6 @@ jobs:
             exit 1
           fi
           du -sh build/staged-firmware
-          ls build/staged-firmware | wc -l
 
       - name: Fetch guest image
         id: guest
@@ -229,7 +266,40 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            v0.4.0 - JIT-capable QEMU (UTM.ipa) + JIT entitlements.
+            v0.4.1 - dual-engine build (JIT + SE fallback).
+
+            v0.4.0 shipped only UTM.ipa's JIT-only qemu. On the user's
+            LiveContainer + StikDebug setup the mmap MAP_JIT probe
+            returned 0 (StikDebug's register injection fails inside a
+            PluginKit extension), so the JIT binary exited immediately
+            with no fallback.
+
+            v0.4.1 bundles BOTH QEMU variants side by side:
+              qemu-aarch64-softmmu-jit  (UTM.ipa,     29 MB, JIT-only)
+              qemu-aarch64-softmmu-se   (UTM-SE.ipa, 191 MB, interpreter)
+            Renamed at CI time via install_name_tool so they coexist
+            in Frameworks/. Same support library set (24 frameworks) -
+            UTM.ipa's closure is a superset of UTM-SE.ipa's.
+
+            Runtime picks:
+              probe == 1 -> qemu-*-jit
+              probe == 0 -> qemu-*-se
+            Boot log tags the choice as qemu_variant_selected=jit|se.
+            UI shows a colored JIT/SE pill in the toolbar and different
+            "expected boot time" copy on the launching overlay.
+
+            IPA size jumps 120 MB -> ~300 MB. Fair price for guaranteed
+            boot in every reasonable install configuration.
+
+            Install guidance for the user:
+            - If JIT isn't landing under LiveContainer, try installing
+              this IPA directly via SideStore/AltStore. LiveContainer's
+              PluginKit runtime interferes with StikDebug's register
+              injection; main-app-container installs don't have that
+              limitation.
+            - Under LiveContainer without StikDebug: SE fallback kicks
+              in automatically. Boot is slow (5-20 minutes to login
+              prompt) but reliable.
 
             Strategic pivot. Previous builds (v0.3.x) shipped QEMU from
             UTM-SE.ipa - a TCTI-interpreter build with no MAP_JIT, so it

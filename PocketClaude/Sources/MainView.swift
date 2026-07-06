@@ -66,7 +66,7 @@ struct MainView: View {
                 Text("Launching QEMU...")
                     .font(.callout)
                     .foregroundStyle(.white)
-                Text("Booting Alpine (interpreter mode is slow -- ~30-60s expected)")
+                Text(bootingCopy)
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -83,10 +83,14 @@ struct MainView: View {
             // jetsam-killed by iOS's memory manager. Give the user the
             // specific hint per spec plus a Retry.
             if env.sessionSawSerial {
-                errorCard(
-                    title: "VM session ended",
-                    message: "The Alpine kernel started printing to the console, then the session ended without an error. Most likely iOS killed the process for memory pressure - LiveContainer runs sideloaded apps as PluginKit extensions with a tighter jetsam quota (~500 MB) than main apps. Try lowering guest RAM in Settings (currently \(GuestRAM.current()) MB), or sideloading via SideStore/AltStore directly instead of LiveContainer."
-                )
+                let msg: String = {
+                    let base = "The Alpine kernel started printing, then the session ended. Most likely iOS killed the process for memory pressure. Try lowering guest RAM in Settings (currently \(GuestRAM.current()) MB)."
+                    if env.selectedVariant == "se" {
+                        return base + "\n\nYou're in interpreter mode (SE fallback). If you want JIT: install directly via SideStore/AltStore instead of LiveContainer, then re-launch under StikDebug. LiveContainer's PluginKit runtime interferes with StikDebug's register injection so JIT can't land."
+                    }
+                    return base
+                }()
+                errorCard(title: "VM session ended", message: msg)
             } else {
                 EmptyView()
             }
@@ -147,6 +151,7 @@ struct MainView: View {
                 Text(env.vmState.label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                variantPill
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
@@ -226,6 +231,35 @@ struct MainView: View {
         case .starting: return .yellow
         case .running: return .green
         case .error: return .red
+        }
+    }
+
+    private var bootingCopy: String {
+        switch env.selectedVariant {
+        case "jit":
+            return "JIT active -- boot to Alpine login expected in ~15-30 seconds."
+        case "se":
+            return "Interpreter mode (no runtime exec grant). Boot to Alpine login can take 5-20 minutes. Be patient; the terminal will start streaming kernel messages as they arrive."
+        default:
+            return "Booting Alpine..."
+        }
+    }
+
+    /// Small pill next to the VM state indicator in the toolbar showing
+    /// which QEMU variant the engine picked. `nil` before start.
+    private var variantPill: some View {
+        Group {
+            if let v = env.selectedVariant {
+                Text(v.uppercased())
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(v == "jit" ? Color.green.opacity(0.7) : Color.orange.opacity(0.7))
+                    .foregroundStyle(.black)
+                    .clipShape(Capsule())
+            } else {
+                EmptyView()
+            }
         }
     }
 

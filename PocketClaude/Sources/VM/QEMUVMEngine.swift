@@ -68,10 +68,15 @@ final class QEMUVMEngine: VMEngine {
             state = .error("VM already running in this process")
             return
         }
-        guard let qemuPath = GuestAssets.qemuFrameworkPath() else {
-            state = .error("qemu-aarch64-softmmu.framework missing from app bundle")
+        guard let variant = GuestAssets.selectQemuVariant() else {
+            state = .error("neither qemu-*-jit nor qemu-*-se framework present in bundle")
             return
         }
+        logPhase("qemu_variant_selected=\(variant.name)")
+        DispatchQueue.main.async {
+            PocketClaudeEnvironment.shared.selectedVariant = variant.name
+        }
+        let qemuPath = variant.path
         Self.isRunning = true
         state = .starting
 
