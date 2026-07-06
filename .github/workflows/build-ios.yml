@@ -134,4 +134,8 @@ jobs:
           files: build/PocketClaude-unsigned.ipa
           make_latest: true
           draft: false
-          prerelease: true
+          # Not marked prerelease: the /releases/latest/download/ redirect
+          # skips prereleases, so keeping it "true" leaves v0.2.1 as the
+          # apparent latest and defeats the whole point of shipping this
+          # to the user for diagnosis.
+          prerelease: false
