@@ -204,7 +204,9 @@ struct MainView: View {
             return "Login prompt hit. Auto-login as 'dev' about to fire."
         case .startingClaude:
             return "Guest is warm. Claude Code is opening a session."
-        case .ready:
+        case .ready, .claudeFailed, .timedOut:
+            // These stages route to the failure card or dismiss the
+            // overlay; subtitleCopy is unused for them.
             return ""
         }
     }

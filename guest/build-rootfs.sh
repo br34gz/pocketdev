@@ -164,17 +164,12 @@ export USE_BUILTIN_RIPGREP=0
 # as we disable higher tiers:
 #   v0.7.1 -> DFG SpeculativeJIT isFlushed() assertion. Killed DFG.
 #   v0.7.2 -> concurrent GC "Block marks not empty" race. Killed here.
-# Turn every knob to the simplest setting we can.
+# Bun bails on the FIRST invalid JSC option name it sees (verified in
+# v0.7.3 CI where useThreadedGC didn't exist and Bun refused to start).
+# Only ship options we've confirmed exist in this Bun version:
 export BUN_JSC_useJIT=0                # Kill ALL JIT tiers -> LLInt only.
-export BUN_JSC_useDFGJIT=0             # Redundant with useJIT=0; belt+braces.
-export BUN_JSC_useFTLJIT=0             # Redundant.
 export BUN_JSC_useConcurrentGC=0       # Kills the concurrent-marking race.
-export BUN_JSC_useConcurrentJIT=0      # No concurrent JIT compilation threads.
-export BUN_JSC_useGenerationalGC=0     # Simpler single-generation collector.
-export BUN_JSC_useThreadedGC=0         # No parallel GC workers.
-export BUN_GC_HEAP_GROW_FACTOR=1.5     # Smaller heap growth.
-# Also cap the total Node/Bun heap so we don't push against the guest's
-# 1 GB RAM ceiling too hard.
+# Belt-and-braces heap cap so we don't push against the guest's RAM.
 export NODE_OPTIONS="--max-old-space-size=512"
 EOF
 mkdir -p /home/dev/.claude
