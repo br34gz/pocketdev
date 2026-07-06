@@ -24,6 +24,8 @@ final class UnixSocket {
         for attempt in 0..<retries {
             fd = socket(AF_UNIX, SOCK_STREAM, 0)
             if fd < 0 { return false }
+            // (Darwin.close disambiguated everywhere below to avoid
+            //  clashing with self.close() the instance method.)
             var addr = sockaddr_un()
             addr.sun_family = sa_family_t(AF_UNIX)
             let pathBytes = Array(path.utf8)
@@ -41,7 +43,7 @@ final class UnixSocket {
                 }
             }
             if rc == 0 { return true }
-            close(fd); fd = -1
+            Darwin.close(fd); fd = -1
             if attempt < retries - 1 { Thread.sleep(forTimeInterval: retryDelay) }
         }
         return false
