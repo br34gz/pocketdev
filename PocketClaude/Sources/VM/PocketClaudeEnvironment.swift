@@ -22,14 +22,17 @@ final class PocketClaudeEnvironment: ObservableObject {
     func startEngine() {
         stopEngine()
         let workspacePath = resolvedWorkspacePath()
+        _ = workspacePath  // unused in diagnostic build; keeps the resolver warm
         let real: any VMEngine
-        if GuestAssets.isEmbedded && GuestAssets.qemuFrameworkPath() != nil {
-            let e = QEMUVMEngine(workspacePath: workspacePath)
-            e.onAuthURL = { [weak self] url in self?.pendingAuthURL = url }
-            real = e
-        } else {
-            real = StubVMEngine()
-        }
+        // v0.2.2 diagnostic build: force the stub engine unconditionally.
+        // The UTM framework path is deliberately unreachable so we can
+        // prove whether the sideload-launch crash lives in our own Swift
+        // or in the framework payload. Original guard, kept commented
+        // for the re-enable path:
+        //   if GuestAssets.isEmbedded && GuestAssets.qemuFrameworkPath() != nil {
+        //     let e = QEMUVMEngine(workspacePath: workspacePath); ...
+        //   }
+        real = StubVMEngine()
         real.onStateChange = { [weak self] s in
             DispatchQueue.main.async { self?.vmState = s }
         }

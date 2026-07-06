@@ -15,7 +15,7 @@ jobs:
   build:
     name: Build PocketClaude.ipa
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -46,69 +46,17 @@ jobs:
           xcodegen generate
           ls -la PocketClaude.xcodeproj/
 
-      - name: Fetch UTM-SE (source of the iOS QEMU frameworks)
-        # UTM-SE ships the TCTI-interpreter build of QEMU for iOS, licensed
-        # under GPL-2. This is exactly the slow-mode QEMU binary Pocket
-        # Claude needs (spec sections 2 and 6 - interpreter fallback is the
-        # accepted v1 path). We do NOT redistribute their binaries in the
-        # source repo; CI downloads them from the upstream release each build.
-        env:
-          UTM_SE_URL: https://github.com/utmapp/UTM/releases/download/v5.0.3/UTM-SE.ipa
-        run: |
-          mkdir -p build/utm
-          curl -sSL "$UTM_SE_URL" -o build/utm/UTM-SE.ipa
-          ls -lh build/utm/UTM-SE.ipa
-          cd build/utm
-          unzip -q UTM-SE.ipa
-
-      - name: Extract required QEMU + support frameworks
-        # Transitive dependency closure of qemu-aarch64-softmmu.framework,
-        # computed offline from UTM-SE 5.0.3's otool -L output. All are
-        # dynamic frameworks under @rpath/Frameworks; the app-bundle rpath
-        # is @executable_path/Frameworks so they resolve at dlopen time.
-        run: |
-          mkdir -p build/staged-frameworks
-          SRC="build/utm/Payload/UTM SE.app/Frameworks"
-          for fw in \
-              qemu-aarch64-softmmu \
-              glib-2.0.0 gio-2.0.0 gobject-2.0.0 gmodule-2.0.0 \
-              iconv.2 intl.8 ffi.8 \
-              pixman-1.0 jpeg.62 epoxy.0 \
-              crypto.1.1 ssl.1.1 \
-              slirp.0 zstd.1 \
-              spice-server.1 virglrenderer.1 vulkan.1 \
-              gstreamer-1.0.0 gstbase-1.0.0 gstapp-1.0.0 opus.0; do
-            if [[ -d "$SRC/$fw.framework" ]]; then
-              cp -R "$SRC/$fw.framework" build/staged-frameworks/
-            else
-              echo "::error::missing framework $fw in UTM-SE.ipa"
-              exit 1
-            fi
-          done
-          # Strip embedded code signatures - the frameworks are shipped
-          # ad-hoc signed by UTM. Re-signers will re-seal the bundle.
-          find build/staged-frameworks -name _CodeSignature -type d -exec rm -rf {} + 2>/dev/null || true
-          du -sh build/staged-frameworks
-          ls build/staged-frameworks
-
-      - name: Fetch guest image (if published)
-        id: guest
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p build/guest
-          if gh release download guest-latest \
-               --repo "$GITHUB_REPOSITORY" \
-               --pattern 'alpine-claude.qcow2.zst' \
-               --pattern 'vmlinuz-virt' \
-               --pattern 'initramfs-virt' \
-               --dir build/guest; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            ls -lh build/guest
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "No guest-latest release yet; IPA will lack an embedded guest image."
-          fi
+      # v0.2.2 diagnostic build:
+      # - No UTM-SE download
+      # - No QEMU framework extraction / embedding / codesign
+      # - No guest image fetch
+      # Purpose: prove whether the sideload-launch crash lives in the
+      # framework payload (v0.2.1 shipped a full embed with adhoc-signed
+      # UTM frameworks and still SIGHUP'd instantly on the user's device)
+      # or in our own Swift/project setup. If v0.2.2 boots, the bisection
+      # target is the framework payload. If v0.2.2 also crashes, the
+      # target is our Swift/project setup — the boot log at
+      # Documents/pocket-claude-boot.log tells us how far the process got.
 
       - name: Build archive (no signing)
         run: |
@@ -126,58 +74,16 @@ jobs:
             archive
 
       - name: Package unsigned IPA
-        # The archive doesn't know about the QEMU frameworks (they arrive
-        # post-archive to keep xcodebuild fast). Same for the guest image.
-        # Both are copied into the .app before we zip to Payload/.
         run: |
           APP=build/PocketClaude.xcarchive/Products/Applications/PocketClaude.app
-          mkdir -p "$APP/Frameworks"
-          cp -R build/staged-frameworks/* "$APP/Frameworks/"
 
-          if [[ "${{ steps.guest.outputs.found }}" == "true" ]]; then
-            mkdir -p "$APP/GuestImage"
-            cp build/guest/* "$APP/GuestImage/"
-          fi
-
-          # Aggressive re-sign: UTM ships each framework mach-O with an
-          # LC_CODE_SIGNATURE blob from their own build. Sideload
-          # re-signers (SideStore, LiveContainer, TrollStore) may fail
-          # or be flaky when replacing an existing signature vs signing
-          # a clean binary. Strip and re-adhoc-sign every mach-O so the
-          # sideloader has a uniform baseline. See v0.2.0 launch crash:
-          # process died with SIGHUP within milliseconds of exec, most
-          # likely amfid rejecting inconsistent signature states.
-          echo "=== Framework signature normalization ==="
-          for fw in "$APP/Frameworks"/*.framework; do
-            name=$(basename "$fw" .framework)
-            bin="$fw/$name"
-            if [[ -f "$bin" ]] && file "$bin" | grep -q "Mach-O"; then
-              codesign --remove-signature "$bin" 2>/dev/null || true
-              codesign --force --sign - --timestamp=none "$bin"
-              # sanity: dump BUILD_VERSION so we can spot min-OS mismatches
-              minos=$(otool -l "$bin" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/{print $2; exit}')
-              echo "  $name  minos=$minos  signed=adhoc"
-            fi
-          done
-          # And re-sign the main app binary too so PocketClaude itself
-          # ships with a clean adhoc signature (was unsigned before).
+          # Adhoc-sign the app binary so the sideloader has a clean
+          # baseline to replace. Same as v0.2.1 for the main binary path.
           codesign --force --sign - --timestamp=none "$APP/PocketClaude"
-          echo "=== Verification pass ==="
+          echo "=== Verification ==="
           codesign -dv "$APP" 2>&1 | head -5 || true
-
-          # GPL-2 notice for the QEMU frameworks bundled with the IPA.
-          cat > "$APP/QEMU-NOTICE.txt" <<'NOTICE'
-          This app bundle includes qemu-system-aarch64 and support libraries
-          from utmapp/UTM (UTM-SE.ipa, v5.0.3), licensed under GNU GPL v2.
-
-          Source code:
-            QEMU:  https://gitlab.com/qemu-project/qemu
-            UTM:   https://github.com/utmapp/UTM
-            Build: https://github.com/utmapp/UTM/releases/tag/v5.0.3
-
-          Pocket Claude itself is MIT-licensed; the combined redistributable
-          IPA is effectively GPL-2 due to the bundled QEMU components.
-          NOTICE
+          echo "=== .app contents ==="
+          ls -la "$APP"
 
           mkdir -p build/Payload
           cp -R "$APP" build/Payload/
@@ -199,10 +105,26 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketClaude v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            Auto-built unsigned IPA for sideloading (LiveContainer / SideStore / AltStore).
+            DIAGNOSTIC BUILD — no QEMU frameworks embedded, no guest image.
 
-            Guest image embedded: ${{ steps.guest.outputs.found }}
-            QEMU frameworks:      utmapp/UTM v5.0.3 (UTM-SE.ipa, TCTI interpreter)
+            Purpose: v0.2.0 and v0.2.1 both crashed at launch on sideloaded
+            installs (SIGHUP within milliseconds of exec). This build strips
+            everything QEMU-related to isolate whether the crash is in the
+            framework payload or in our Swift/project setup.
+
+            IMPORTANT — DELETE THE PREVIOUS INSTALL FIRST:
+            iOS caches framework signatures per bundle-ID. Long-press the
+            app icon and choose "Remove App" → "Delete App" before
+            sideloading this build. A plain reinstall over v0.2.0/v0.2.1
+            may inherit stale signature state and repeat the crash.
+
+            After launch, the boot log is at:
+              Files → On My iPhone → PocketClaude → pocket-claude-boot.log
+            Expected lines (in order):
+              dylib_ctor       — C constructor ran (main binary loaded)
+              app_init         — Swift App.init ran
+              delegate_launch  — UIApplicationDelegate fired
+              root_appear      — first SwiftUI view mounted
 
             Commit: ${{ github.sha }}
             Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -212,4 +134,4 @@ jobs:
           files: build/PocketClaude-unsigned.ipa
           make_latest: true
           draft: false
-          prerelease: false
+          prerelease: true
