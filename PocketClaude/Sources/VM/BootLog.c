@@ -1,5 +1,6 @@
 #include "BootLog.h"
 
+#include <dlfcn.h>
 #include <mach/mach.h>
 #include <pthread.h>
 #include <signal.h>
@@ -57,15 +58,16 @@ int pocket_probe_jit(void) {
     if (p == MAP_FAILED) {
         return 0;  // jit_unavailable
     }
-    // Toggle to writable (W enabled, X disabled), write a nop, toggle
-    // back to executable. If toggling itself blows up we're in the
-    // "allowed but broken" middle state.
-    pthread_jit_write_protect_np(0);
-    // NOP + RET so the page is well-formed even if the OS enforces
-    // strict W^X.
+    // pthread_jit_write_protect_np is marked macOS-only in the iOS
+    // SDK but does exist at runtime on iOS 17+ - dlsym it to bypass
+    // the SDK availability check. If the symbol is missing we still
+    // report success on the mmap; the write below stays permitted
+    // because MAP_JIT with PROT_WRITE was already accepted.
+    void (*toggle)(int) = dlsym(RTLD_DEFAULT, "pthread_jit_write_protect_np");
+    if (toggle) toggle(0);  // W enabled, X disabled
     ((uint32_t *)p)[0] = 0xD503201F;  // NOP
     ((uint32_t *)p)[1] = 0xD65F03C0;  // RET
-    pthread_jit_write_protect_np(1);
+    if (toggle) toggle(1);  // W disabled, X enabled
     munmap(p, page);
     return 1;  // jit_allowed
 }
