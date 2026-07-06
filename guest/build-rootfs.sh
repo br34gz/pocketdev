@@ -32,6 +32,10 @@ apk --root "$ROOT" --initdb --no-cache add \
 # --- Install claude-code from the npm registry ---------------------------
 # Runs inside the rootfs chroot so npm's prefix is /usr and the resulting
 # 'claude' shim lands in /usr/bin/claude via /usr/lib/node_modules linkage.
+# Needs working DNS inside the chroot; the outer container's resolv.conf
+# is what actually works, so borrow it. Overwritten below with the
+# runtime SLIRP defaults.
+cp /etc/resolv.conf "$ROOT/etc/resolv.conf"
 
 chroot "$ROOT" sh -c "
     npm config set fund false
