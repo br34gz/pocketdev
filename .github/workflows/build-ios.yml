@@ -270,61 +270,26 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}-build.${{ github.run_number }}
           name: "PocketDev v${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
           body: |
-            PocketDev v0.7.6 - disk space fix (ENOSPC was the null-bytes cause).
+            PocketDev v0.7.6 - qcow2 4 GB, resize2fs, PID 1 supervisor.
 
-            Big theory reversal: v0.7.5's ChatGPT session on device
-            found the real culprit isn't a Bun TCTI-emulation fs bug -
-            it's ENOSPC. Bun's Node fs compat layer misreports "no
-            space left on device" as a "path... without null bytes"
-            TypeError. That explains everything: the bug follows \$HOME
-            (each user's own quota), reproduces on rootfs not just 9p,
-            fires on every first-time mkdir. ChatGPT hit
-            "No space left on device" unpacking a 76 MB tarball.
+            Theory pivot: ChatGPT diagnostics on device found the
+            null-bytes error is Bun misreporting ENOSPC. Bug follows
+            HOME dir, reproduces on rootfs not just 9p, ChatGPT hit
+            explicit "No space left on device" unpacking a 76 MB tar.
 
             Changes:
+            - qcow2 max virtual 2 GB to 4 GB.
+            - /pocket-init runs resize2fs /dev/vda early.
+            - Rootfs slim - apt autoremove, drop journal/npm caches.
+            - npm user prefix for dev under HOME/.npm-global.
+            - PID 1 supervisor loop so exit from shell no longer
+              kernel-panics init.
+            - /pocket-init prints disk_free_mb to console + logs
+              to /etc/pocketdev-boot.log with timestamps.
 
-            1. qcow2 max virtual disk 2 GB -> 4 GB. Debian + node/npm
-               + claude-code baseline eats ~1.5 GB; 500 MB left over
-               was the problem. qcow2 stays thin-provisioned so the
-               on-disk / IPA footprint is unchanged until data fills it.
-
-            2. /pocket-init runs `resize2fs /dev/vda` early to grow
-               the mounted ext4 filesystem live to fill the underlying
-               4 GB block device.
-
-            3. Rootfs slim pass - target under ~900 MB pre-first-launch:
-                 apt-get autoremove
-                 rm -rf /var/log/journal, /var/log/apt
-                 rm -rf /root/.npm, /root/.cache
-                 truncate log files to 0
-                 (existing man/doc/info/non-en-locale strips retained)
-
-            4. npm user prefix for dev in /etc/profile.d/claude.sh:
-                 NPM_CONFIG_PREFIX=\$HOME/.npm-global
-                 PATH=\$HOME/.npm-global/bin:\$PATH
-               so `npm install -g <pkg>` works as non-root without
-               sudo. Pre-created /home/dev/.npm-global at build time.
-
-            5. PID 1 kernel panic fix. Previously /pocket-init exec'd
-               login as PID 1, so when the user typed `exit` from the
-               shell the kernel panic'd ("Attempted to kill init!").
-               v0.7.6 turns /pocket-init into a supervising loop:
-                 trap '' HUP INT TERM
-                 while true; do
-                     setsid -c /bin/login -f dev </dev/console ...
-                     sleep 2
-                 done
-               `exit` from the shell now just relaunches login.
-
-            6. Disk-free telemetry. /pocket-init prints
-               'disk_free_mb=<N>' to /dev/console on boot and after
-               every login exit; also mirrors to
-               /etc/pocketdev-boot.log with UTC timestamps.
-
-            If the disk theory is right, this ships a working
-            Claude Code appliance. If claude still hits null-bytes
-            with plenty of free space, v0.8.0 pivots to a Python
-            pd-cli wrapping Anthropic's Messages API directly.
+            If disk theory holds, this ships a working appliance.
+            If claude still crashes with free space, v0.8.0 pivots
+            to a Python pd-cli wrapping Anthropic Messages API.
 
             v0.7.4 shipped workspace 9p in CI + pre-created .claude
             dirs; that fixed the /workspace/.claude/workflows crash.
